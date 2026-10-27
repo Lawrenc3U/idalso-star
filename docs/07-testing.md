@@ -9,6 +9,10 @@
 
 Luau CLI used: upstream luau-lang/luau commit `32c28089305f488f901aaf1dbf3fd1cb65fa3d11`, compiled locally using its Makefile. Runtime tests use mocked Roblox services and do not simulate engine/network/DataStore scheduling fully.
 
+## Unpublished Studio startup correction
+
+DataStore acquisition is now lazy and occurs inside the protected persistence path. In-memory Studio mode never requests a real DataStore. Five new regression assertions exercise module loading, transactions, save/release and rejoin against an unpublished-place mock that throws if GetDataStore is called. All five pass; the same regression fails on the prior version with the reported error. The original 36 service assertions also pass. Actual Studio execution remains pending.
+
 ## Required Studio/manual checks — all pending
 
 ### First playable slice

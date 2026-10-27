@@ -98,12 +98,25 @@ check(Retention.code(c,"WELCOME"),"valid code grants")
 check(not Retention.code(c,"WELCOME"),"code replay rejected")
 print("RESULT",passed,"checks passed")
 '''
+STUDIO_TESTS=r'''
+local player={UserId=55}
+check(Data.load(player),"unpublished Studio profile loads without real DataStore access")
+check(Data.transaction(player,function(p) p.Money=75; return true end,true),"Studio memory durable transaction")
+check(Data.save(player,true),"Studio memory save and release")
+check(Data.load(player),"Studio memory rejoin")
+check(Data.read(player).Money==75,"Studio memory state retained within run")
+print("RESULT",passed,"unpublished Studio regression checks passed")
+'''
 def main():
  parser=argparse.ArgumentParser(); parser.add_argument('--luau',default='luau'); args=parser.parse_args()
  script=HEADER+'\nlocal Config='+module('src/ReplicatedStorage/Shared/Config.luau')
  for name,file in [('Data','DataService'),('Money','MonetizationService'),('Bag','BackpackService'),('Rank','RankService'),('Shop','ShopService'),('Prestige','PrestigeService'),('Retention','RetentionService')]:
   script+='\nlocal '+name+'='+module('src/ServerScriptService/Services/'+file+'.luau')
  with tempfile.TemporaryDirectory() as d:
+  studio_header=HEADER.replace('IsStudio=function() return false end','IsStudio=function() return true end').replace('GetDataStore=function() return mockStore end', 'GetDataStore=function() error(\"You must publish this place to the web to access DataStore.\") end')
+  studio_script=studio_header+'\nlocal Config='+module('src/ReplicatedStorage/Shared/Config.luau')+'\nlocal Data='+module('src/ServerScriptService/Services/DataService.luau')+'\n'+STUDIO_TESTS
+  studio_file=Path(d)/'unpublished-studio.luau'; studio_file.write_text(studio_script)
+  subprocess.run([args.luau,str(studio_file)],check=True)
   file=Path(d)/'services.luau';file.write_text(script+'\n'+TESTS)
   subprocess.run([args.luau,str(file)],check=True)
 if __name__=='__main__':main()

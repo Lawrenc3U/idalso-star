@@ -292,7 +292,10 @@ local Http = game:GetService("HttpService")
 local Run = game:GetService("RunService")
 local C = require(game.ReplicatedStorage.Shared.Config)
 local Data: any = {Sessions={}, Closing=false}
-local store = DSS:GetDataStore(C.DataStore)
+-- Unpublished Studio places must never open a real DataStore in memory mode.
+-- Open lazily inside update's pcall so access failures follow the safe load path.
+local useMemory = Run:IsStudio() and C.StudioMemory
+local store: any = nil
 local memory: {[string]: any} = {}
 local function copy(x: any): any
  if type(x) ~= "table" then return x end
@@ -308,10 +311,11 @@ end
 local function update(key: string, fn: (any)-&gt;any): (boolean, any)
  for attempt=1,4 do
   local ok,res=pcall(function()
-   if Run:IsStudio() and C.StudioMemory then
+   if useMemory then
     local nextValue=fn(copy(memory[key])); if nextValue then memory[key]=copy(nextValue) end
     return copy(memory[key])
    end
+   if not store then store = DSS:GetDataStore(C.DataStore) end
    return store:UpdateAsync(key,fn)
   end)
   if ok then return true,res end
