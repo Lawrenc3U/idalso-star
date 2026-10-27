@@ -2,14 +2,11 @@
 local Tags=game:GetService("CollectionService")
 local Players=game:GetService("Players")
 local C=require(game.ReplicatedStorage.Shared.Config)
+local Art=require(script.Parent.WorldArt)
 local M: any = {Mines={},Blocks={},Last={},Visits={},Current={},Random=Random.new()}
 local function part(name: string,size: Vector3,position: Vector3,color: Color3,parent: Instance): Part
  local p=Instance.new("Part"); p.Name=name; p.Size=size; p.Position=position
  p.Color=color; p.Anchored=true; p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth; p.Parent=parent; return p
-end
-local function label(p: BasePart,text: string)
- local gui=Instance.new("BillboardGui"); gui.Size=UDim2.fromOffset(260,65); gui.StudsOffset=Vector3.new(0,5,0); gui.AlwaysOnTop=true; gui.MaxDistance=100; gui.Parent=p
- local t=Instance.new("TextLabel"); t.Size=UDim2.fromScale(1,1); t.BackgroundTransparency=1; t.Text=text; t.TextColor3=Color3.new(1,1,1); t.TextStrokeTransparency=0.3; t.TextScaled=true; t.Font=Enum.Font.GothamBold; t.Parent=gui
 end
 function M.new(data: any,bag: any,analytics: any) M.Data=data; M.Bag=bag; M.A=analytics end
 function M.safe(tier: number): Vector3 return Vector3.new((tier-1)*90,5,24) end
@@ -46,6 +43,7 @@ function M.reset(tier: number)
     for i,ore in C.Ores do roll-=ore.Weight; if roll<=0 then index=i; break end end
     local ore=C.Ores[index]
     local b=part(ore.Name,Vector3.one*C.BlockSize,Vector3.new(mine.X+(x-2.5)*4,-2-y*4,(z-2.5)*4),ore.Color,mine.Folder)
+    Art.ore(b,index,tier)
     b:SetAttribute("Health",ore.Health); b:SetAttribute("MaxHealth",ore.Health); b:SetAttribute("Tier",tier)
     Tags:AddTag(b,"MineBlock")
     M.Blocks[b]={Tier=tier,Ore=index,Health=ore.Health,Generation=mine.Generation}
@@ -62,35 +60,29 @@ function M.reset(tier: number)
   end
  end
 end
+function M.goSell(player: Player): boolean
+ local p=M.Data.read(player); if not p then return false end
+ local tier=M.Current[player] or 1
+ if tier>p.Rank then return false end
+ local mine=M.Mines[tier]; local character=player.Character
+ local human=character and character:FindFirstChildOfClass("Humanoid")
+ if not mine or not character or not human or human.Health<=0 then return false end
+ local destination=mine.Sell.Position+Vector3.new(0,4,-1)
+ character:PivotTo(CFrame.lookAt(destination,destination+Vector3.new(0,0,1)))
+ M.Current[player]=tier; return true
+end
 function M.build()
  local world=Instance.new("Folder"); world.Name="YardworkWorld"; world.Parent=workspace
- local lighting=game:GetService("Lighting"); lighting.ClockTime=14; lighting.Brightness=2
- lighting.Ambient=Color3.fromRGB(130,144,170)
- local atmosphere=Instance.new("Atmosphere"); atmosphere.Density=0.2; atmosphere.Parent=lighting
- local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.15; bloom.Threshold=1.5; bloom.Parent=lighting
+ Art.lighting()
  local count=if C.Prototype then 1 else 26
  for tier=1,count do
   local x=(tier-1)*90
-  part("Courtyard",Vector3.new(76,2,68),Vector3.new(x,-14,5),Color3.fromRGB(91,111,121),world)
-  -- Safe rim at y=0 with a central opening into the mine.
-  part("Front",Vector3.new(60,2,16),Vector3.new(x,-1,21),Color3.fromRGB(216,192,146),world)
-  part("Back",Vector3.new(60,2,12),Vector3.new(x,-1,-19),Color3.fromRGB(216,192,146),world)
-  for _,dx in {-22,22} do part("Side",Vector3.new(16,2,24),Vector3.new(x+dx,-1,0),Color3.fromRGB(216,192,146),world) end
-  local sell=part("SellZone",Vector3.new(10,0.3,8),Vector3.new(x-18,0.2,22),Color3.fromRGB(75,214,163),world); label(sell,"SELL • tap Sell All")
-  Tags:AddTag(sell,"SellZone")
-  local sign=part("MineSign",Vector3.new(3,5,1),Vector3.new(x,3,-21),Color3.fromRGB(36,91,108),world)
-  label(sign,"Mine "..string.char(64+tier))
-  local region=part("MineRegion",Vector3.new(24,12,24),Vector3.new(x,-6,0),Color3.new(),world)
-  region.Transparency=1; region.CanCollide=false; region.CanQuery=false; region:SetAttribute("Tier",tier); Tags:AddTag(region,"MineRegion")
+  local yard=Art.yard(world,x,tier)
+  yard.Prompt.Triggered:Connect(function(player: Player)
+   if M.PromptSell then M.PromptSell(player) end
+  end)
   local folder=Instance.new("Folder"); folder.Name="Blocks"..tier; folder.Parent=world
-  M.Mines[tier]={X=x,Folder=folder,Sell=sell,Next=0,Resetting=false,Generation=0}
-  if tier==1 then
-   local spawn=Instance.new("SpawnLocation"); spawn.Size=Vector3.new(7,1,7); spawn.Position=Vector3.new(x,0.5,25); spawn.Anchored=true; spawn.Neutral=true; spawn.Parent=world
-   local lounge=part("VIPLounge",Vector3.new(20,2,20),Vector3.new(-50,-1,25),Color3.fromRGB(139,111,62),world); label(lounge,"VIP • cosmetic lounge")
-   local counter=part("Workshop",Vector3.new(8,5,4),Vector3.new(x+20,2.5,25),Color3.fromRGB(43,137,151),world); label(counter,"WORKSHOP • use Shop")
-   local guard=part("Warden",Vector3.new(3,4,2),Vector3.new(x+10,2,27),Color3.fromRGB(61,85,118),world)
-   part("Head",Vector3.new(2,2,2),Vector3.new(x+10,5,27),Color3.fromRGB(246,205,156),world); label(guard,"Welcome! Mine, sell, grow.")
-  end
+  M.Mines[tier]={X=x,Folder=folder,Sell=yard.Sell,Next=0,Resetting=false,Generation=0}
   M.reset(tier)
  end
  task.spawn(function()

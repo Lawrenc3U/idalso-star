@@ -12,6 +12,7 @@ local P=require(services.PrestigeService)
 local S=require(services.ShopService)
 local T=require(services.RetentionService)
 local Mine=require(services.MineService)
+local Art=require(services.WorldArt)
 local Money=require(services.MonetizationService)
 local Leaders=require(services.LeaderboardService)
 local remotes=Instance.new("Folder"); remotes.Name="YardworkRemotes"; remotes.Parent=RS
@@ -29,13 +30,23 @@ local function push(player: Player)
  state:FireClient(player,{Money=p.Money,Tokens=p.Tokens,Rank=p.Rank,Prestiges=p.Prestiges,
   Pick=p.Pick,Bag=p.Bag,Count=B.count(p),Capacity=B.capacity(player,p),Enchants=p.Enchants,
   BoostUntil=p.BoostUntil,ResetCredits=p.ResetCredits,Streak=p.Streak,Daily=p.Daily,
-  MineTier=Mine.Current[player] or 1,Passes=E.Passes[player] or {},Settings=p.Settings,Resets=resets,Leaders=Leaders.Cache})
+  NearSell=Mine.nearSell(player),MineTier=Mine.Current[player] or 1,Passes=E.Passes[player] or {},Settings=p.Settings,Resets=resets,Leaders=Leaders.Cache})
+ for _,container in {player.Character,player:FindFirstChild("Backpack")} do
+  if container then for _,child in container:GetChildren() do if child:IsA("Tool") and child:GetAttribute("YardworkPick") then Art.stylePickaxe(child,p.Pick,p.Enchants.Skin>0) end end end
+ end
  local stats=player:FindFirstChild("leaderstats")
  if stats then
   local money=stats:FindFirstChild("Money") :: NumberValue; money.Value=p.Money
   local rank=stats:FindFirstChild("Rank") :: IntValue; rank.Value=p.Rank
   local prestige=stats:FindFirstChild("Prestiges") :: IntValue; prestige.Value=p.Prestiges
  end
+end
+Mine.PromptSell=function(player: Player)
+ if working[player] or not Mine.nearSell(player) then return end
+ working[player]=true
+ local ok,sold=pcall(B.sell,player)
+ working[player]=nil
+ if ok then push(player); if not sold then notice:FireClient(player,"Your backpack is empty. Mine a few blocks first.") end end
 end
 local function joined(player: Player)
  if not Data.load(player) then player:Kick("Profile busy or unavailable. Please try again shortly; no progress was overwritten."); return end
@@ -56,10 +67,14 @@ local function joined(player: Player)
   local humanoid=character:FindFirstChildOfClass("Humanoid")
   if humanoid and E.pass(player,"VIP") then humanoid.DisplayName="[VIP] "..player.DisplayName end
   local tool=Instance.new("Tool"); tool.Name="Yard Pick"; tool.RequiresHandle=true; tool.CanBeDropped=false
-  local handle=Instance.new("Part"); handle.Name="Handle"; handle.Size=Vector3.new(0.3,3,0.3); handle.Color=Color3.fromRGB(143,91,58); handle.CanCollide=false; handle.Massless=true; handle.Parent=tool
-  local blade=Instance.new("Part"); blade.Name="Blade"; blade.Size=Vector3.new(2.6,0.5,0.5); blade.Color=Color3.fromRGB(117,206,210); blade.CanCollide=false; blade.Massless=true; blade.CFrame=handle.CFrame*CFrame.new(0,1.2,0); blade.Parent=tool
-  local weld=Instance.new("WeldConstraint"); weld.Part0=handle; weld.Part1=blade; weld.Parent=handle
-  local backpack=player:WaitForChild("Backpack",10); if backpack then tool.Parent=backpack end
+  tool:SetAttribute("YardworkPick",true); Art.pickaxe(tool)
+  local backpack=player:WaitForChild("Backpack",10)
+  if backpack then
+   tool.Parent=backpack
+   local profile=Data.read(player)
+   if profile then Art.stylePickaxe(tool,profile.Pick,profile.Enchants.Skin>0) end
+   if humanoid then humanoid:EquipTool(tool) end
+  end
  end
  player.CharacterAdded:Connect(characterReady)
  if player.Character then task.spawn(characterReady,player.Character) end
@@ -83,6 +98,7 @@ action.OnServerEvent:Connect(function(player: Player,verb: any,arg: any)
   if verb=="Sync" then push(player); return
   elseif verb=="Mine" and typeof(arg)=="Instance" then success=Mine.hit(player,arg)
   elseif verb=="Sell" and Mine.nearSell(player) then success=B.sell(player)
+  elseif verb=="VisitSell" then success=Mine.goSell(player)
   elseif verb=="Rank" then success=R.buy(player)
   elseif verb=="Prestige" and arg=="CONFIRM_RESET" then success=P.buy(player); if success then Mine.teleport(player,1) end
   elseif verb=="Shop" and type(arg)=="string" and #arg<=20 then success=S.buy(player,arg)
@@ -106,7 +122,14 @@ action.OnServerEvent:Connect(function(player: Player,verb: any,arg: any)
   elseif verb=="Setting" and type(arg)=="string" and (arg=="Music" or arg=="Effects" or arg=="Motion") then
    success=Data.transaction(player,function(p: any) p.Settings[arg]=not p.Settings[arg]; return true end)
   end
-  if verb~="Mine" then notice:FireClient(player,if success then "Done!" else "Unavailable: check cost, access, capacity, or stand near Sell.") end
+  if verb~="Mine" then
+   local messages={Shop="Upgrade equipped.",Rank="New rank unlocked!",Visit="Back at the quarry.",VisitSell="Ready to sell your haul.",Setting="Preference saved.",Daily="Daily reward claimed.",Code="Code redeemed.",Reset="Safe reset scheduled.",Prestige="A fresh start!",VIP="Welcome to the quiet corner."}
+   if success then
+    if messages[verb] then notice:FireClient(player,messages[verb]) end
+   else
+    notice:FireClient(player,if verb=="Sell" then "Stand near the green sell counter with ore in your bag." else "Not available yet. Check the requirement shown in the menu.")
+   end
+  end
   push(player)
  end)
  working[player]=nil

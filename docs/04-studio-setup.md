@@ -4,7 +4,7 @@
 
 1. Open `dist/Yardwork.rbxlx` as a local place. Keep an untouched backup.
 2. Inspect Explorer: Shared modules under ReplicatedStorage, Bootstrap/Services under ServerScriptService, Game under StarterPlayerScripts. Do not copy multiple Bootstraps into one place.
-3. Play. Walk toward the mine, aim at a visible block, click/hold or use the touch Hold button. The backpack fills only when blocks break. Walk to the green sell pad, press Sell All, then open Workshop for equipment and ranks. Return to safety is in Choose mine.
+3. Play. Walk toward the mine, aim at a visible block, click/hold or use the touch Hold button. The backpack fills only when blocks break. Walk to the green sell pad, press Sell All, then open Upgrades for equipment and ranks. The backpack card’s Go to sell button travels to the counter, and Mines contains Return to the rim.
 4. Test two clients using Studio's server/client test mode. Each client sees a shared mine. A final valid hit wins a block's reward. Use Output to inspect script errors.
 5. Turn off Play before editing source. Saving a local place during Play does not preserve runtime-generated world instances as authoring source.
 
@@ -16,7 +16,7 @@ The in-memory Studio mode cannot test cross-process locks or restart persistence
 
 ## World layout and tags
 
-The current world is generated automatically; no manual tags or remotes are required. Prototype mine centre is `(0,-6,0)` with a 24×12×24 block volume, a safe rim, a sell pad near `(-18,0,22)`, and spawn near `(0,1,25)`. Expanded mines are 90 studs apart along X. Keep the central hole clear and preserve the floor under the deepest blocks. The menu's Return to safety avoids trapping a player at the bottom.
+The current world is generated automatically; no manual tags or remotes are required. Prototype mine centre is `(0,-6,0)` with a 24×12×24 block volume, a safe rim, a sell pad near `(-20,0,23)`, and spawn near `(0,1,24)`. WorldArt creates the original quarry scenery; see Stage 9 for Blender source/import notes. Expanded mines are 90 studs apart along X. Keep the central hole clear and preserve the floor under the deepest blocks. The menu's Return to safety avoids trapping a player at the bottom.
 
 For a custom art pass, add decorative models outside block volumes and safe relocation points. Keep visual props out of mining ray paths. Use CollectionService tags MineRegion, MineBlock and SellZone for inspection. Tags alone are not registration: MineService's registry and reset state own mining eligibility. Modify the procedural dimensions/positions and safe-point function together if changing the map. Do not duplicate tagged regions and expect the system to discover a complete custom mine automatically.
 

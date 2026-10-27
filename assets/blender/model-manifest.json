@@ -1,0 +1,50 @@
+[
+  {
+    "file": "guard_tower.fbx",
+    "runtime_group": "GuardTower",
+    "source_triangles_before_bevel": 132,
+    "objects": 11
+  },
+  {
+    "file": "warden_milo.fbx",
+    "runtime_group": "WardenMilo",
+    "source_triangles_before_bevel": 204,
+    "objects": 17
+  },
+  {
+    "file": "ore_cart.fbx",
+    "runtime_group": "OreCart",
+    "source_triangles_before_bevel": 168,
+    "objects": 6
+  },
+  {
+    "file": "workshop_stall.fbx",
+    "runtime_group": "THE WORKSHOPStall",
+    "source_triangles_before_bevel": 168,
+    "objects": 14
+  },
+  {
+    "file": "sell_stall.fbx",
+    "runtime_group": "ORE EXCHANGEStall",
+    "source_triangles_before_bevel": 144,
+    "objects": 12
+  },
+  {
+    "file": "supply_crate.fbx",
+    "runtime_group": "SupplyCrate",
+    "source_triangles_before_bevel": 48,
+    "objects": 4
+  },
+  {
+    "file": "yard_pickaxe.fbx",
+    "runtime_group": "YardPickaxe",
+    "source_triangles_before_bevel": 88,
+    "objects": 8
+  },
+  {
+    "file": "quarry_tree.fbx",
+    "runtime_group": "QuarryTree",
+    "source_triangles_before_bevel": 44,
+    "objects": 5
+  }
+]

@@ -16,7 +16,7 @@ All runnable files are in `src/`, embedded in `dist/Yardwork.rbxlx`. They use `-
 | Purchases | Pass checks and durable replay-safe product grants | All IDs disabled; platform tests required |
 | Reset product | Durable credit and pending reset intent; warning and recovery | At-least-once world reset on a crash; no duplicated currency grant |
 | Retention | Daily, server-defined codes, event multiplier and friends | Disabled in prototype; event off until UTC times configured |
-| UI | HUD, bars, shop/rank/prestige, notifications, settings, crosshair | Device layout/accessibility pass required |
+| UI | Responsive cards, three navigation buttons, gear/menu screens, target outline/health, sell travel | Device layout/accessibility pass required |
 | Analytics/leaders | First-event custom metrics and top-ten ordered-store cache | Live platform APIs unverified; leaderboard updates every 120 seconds |
 
 ## Reset and receipt recovery
@@ -33,4 +33,4 @@ Expanded mode builds 26 compact mines at server start, not an infinite world. St
 
 ## Current boundaries
 
-The generated art is a usable blockout: functional parts, a simple warden, a visible pickaxe, basic reward effects and an optional local buddy. It is not a finished commissioned art package. Original generated WAV files are included; upload them to Roblox and enter audio IDs for audible feedback. Purchases, platform analytics, current policy compliance, name availability, real saves, device performance and public publishing need Studio/Creator Dashboard access that this environment lacks.
+The updated art includes a cohesive low-poly quarry, a guard tower, shop stalls, faceted rocks/trees, a modelled warden and multi-part pickaxe. The matching original Blender library and eight FBX exports are included; see Stage 9. The runtime uses Roblox primitives and needs no mesh IDs. Original generated WAV files are included; upload them to Roblox and enter audio IDs for audible feedback. Purchases, platform analytics, current policy compliance, name availability, real saves, device performance and public publishing need Studio/Creator Dashboard access that this environment lacks.

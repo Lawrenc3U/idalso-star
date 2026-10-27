@@ -70,6 +70,47 @@ return C
       </Item>
       <Item class="ModuleScript" referent="RBX5">
         <Properties>
+          <string name="Name">HUDLayout</string>
+          <ProtectedString name="Source">--!strict
+-- Pure layout arithmetic so small-screen spacing can be checked without Roblox.
+export type Rect = {X: number, Y: number, W: number, H: number}
+local L = {}
+function L.compute(width: number,height: number): any
+ local w=math.max(width,320); local h=math.max(height,320)
+ local phone=w&lt;600; local landscape=h&lt;500
+ local margin=if phone then 12 else 20
+ local function rect(x: number,y: number,rw: number,rh: number): Rect return {X=x,Y=y,W=rw,H=rh} end
+ local walletW=if phone then (if w&lt;350 then 150 else 174) else 218
+ local rankW=if phone then (if w&lt;350 then 134 else 146) else 234
+ local topH=if landscape then 54 else 66
+ local navSize=if landscape then 48 else 56
+ local navGap=8
+ local navW=if landscape then navSize*3+navGap*2 else (if phone then 60 else 132)
+ local navH=if landscape then navSize else navSize*3+navGap*2
+ local goalW=if landscape then math.min(310,w-walletW-rankW-4*margin) else math.min(300,w-2*margin)
+ local goalX=if landscape then (w-goalW)/2 else margin
+ local goalY=if landscape then margin else margin+topH+10
+ local targetW=if w&lt;350 then 140 else 170
+ local bagW=if phone then w-2*margin else math.min(400,w-360)
+ local bagY=if phone then h-216 else h-84
+ local navY=if landscape then 88 else margin+topH+86
+ return {
+  Phone=phone,Landscape=landscape,Margin=margin,
+  Target=rect((w-targetW)/2,h/2+24,targetW,43),
+  Wallet=rect(margin,margin,walletW,topH),Rank=rect(w-margin-rankW,margin,rankW,topH),
+  Goal=rect(goalX,goalY,math.max(0,goalW),if landscape then 54 else 62),
+  Nav=rect(if landscape then (w-navW)/2 else margin,navY,navW,navH),NavSize=navSize,
+  Bag=rect((w-bagW)/2,bagY,bagW,68),
+  Mine=rect(w-margin-76,if phone then math.min(h*0.49,bagY-88) else (if landscape then math.min(156,h-228) else h-236),76,76),
+  Modal=rect((w-math.min(650,w-24))/2,(h-math.min(570,h-24))/2,math.min(650,w-24),math.min(570,h-24)),
+ }
+end
+return L
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX6">
+        <Properties>
           <string name="Name">Types</string>
           <ProtectedString name="Source">--!strict
 export type Profile = {
@@ -85,11 +126,11 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="RBX6">
+  <Item class="ServerScriptService" referent="RBX7">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="RBX7">
+    <Item class="Script" referent="RBX8">
       <Properties>
         <string name="Name">Bootstrap</string>
         <ProtectedString name="Source">--!strict
@@ -106,6 +147,7 @@ local P=require(services.PrestigeService)
 local S=require(services.ShopService)
 local T=require(services.RetentionService)
 local Mine=require(services.MineService)
+local Art=require(services.WorldArt)
 local Money=require(services.MonetizationService)
 local Leaders=require(services.LeaderboardService)
 local remotes=Instance.new("Folder"); remotes.Name="YardworkRemotes"; remotes.Parent=RS
@@ -123,13 +165,23 @@ local function push(player: Player)
  state:FireClient(player,{Money=p.Money,Tokens=p.Tokens,Rank=p.Rank,Prestiges=p.Prestiges,
   Pick=p.Pick,Bag=p.Bag,Count=B.count(p),Capacity=B.capacity(player,p),Enchants=p.Enchants,
   BoostUntil=p.BoostUntil,ResetCredits=p.ResetCredits,Streak=p.Streak,Daily=p.Daily,
-  MineTier=Mine.Current[player] or 1,Passes=E.Passes[player] or {},Settings=p.Settings,Resets=resets,Leaders=Leaders.Cache})
+  NearSell=Mine.nearSell(player),MineTier=Mine.Current[player] or 1,Passes=E.Passes[player] or {},Settings=p.Settings,Resets=resets,Leaders=Leaders.Cache})
+ for _,container in {player.Character,player:FindFirstChild("Backpack")} do
+  if container then for _,child in container:GetChildren() do if child:IsA("Tool") and child:GetAttribute("YardworkPick") then Art.stylePickaxe(child,p.Pick,p.Enchants.Skin&gt;0) end end end
+ end
  local stats=player:FindFirstChild("leaderstats")
  if stats then
   local money=stats:FindFirstChild("Money") :: NumberValue; money.Value=p.Money
   local rank=stats:FindFirstChild("Rank") :: IntValue; rank.Value=p.Rank
   local prestige=stats:FindFirstChild("Prestiges") :: IntValue; prestige.Value=p.Prestiges
  end
+end
+Mine.PromptSell=function(player: Player)
+ if working[player] or not Mine.nearSell(player) then return end
+ working[player]=true
+ local ok,sold=pcall(B.sell,player)
+ working[player]=nil
+ if ok then push(player); if not sold then notice:FireClient(player,"Your backpack is empty. Mine a few blocks first.") end end
 end
 local function joined(player: Player)
  if not Data.load(player) then player:Kick("Profile busy or unavailable. Please try again shortly; no progress was overwritten."); return end
@@ -150,10 +202,14 @@ local function joined(player: Player)
   local humanoid=character:FindFirstChildOfClass("Humanoid")
   if humanoid and E.pass(player,"VIP") then humanoid.DisplayName="[VIP] "..player.DisplayName end
   local tool=Instance.new("Tool"); tool.Name="Yard Pick"; tool.RequiresHandle=true; tool.CanBeDropped=false
-  local handle=Instance.new("Part"); handle.Name="Handle"; handle.Size=Vector3.new(0.3,3,0.3); handle.Color=Color3.fromRGB(143,91,58); handle.CanCollide=false; handle.Massless=true; handle.Parent=tool
-  local blade=Instance.new("Part"); blade.Name="Blade"; blade.Size=Vector3.new(2.6,0.5,0.5); blade.Color=Color3.fromRGB(117,206,210); blade.CanCollide=false; blade.Massless=true; blade.CFrame=handle.CFrame*CFrame.new(0,1.2,0); blade.Parent=tool
-  local weld=Instance.new("WeldConstraint"); weld.Part0=handle; weld.Part1=blade; weld.Parent=handle
-  local backpack=player:WaitForChild("Backpack",10); if backpack then tool.Parent=backpack end
+  tool:SetAttribute("YardworkPick",true); Art.pickaxe(tool)
+  local backpack=player:WaitForChild("Backpack",10)
+  if backpack then
+   tool.Parent=backpack
+   local profile=Data.read(player)
+   if profile then Art.stylePickaxe(tool,profile.Pick,profile.Enchants.Skin&gt;0) end
+   if humanoid then humanoid:EquipTool(tool) end
+  end
  end
  player.CharacterAdded:Connect(characterReady)
  if player.Character then task.spawn(characterReady,player.Character) end
@@ -177,6 +233,7 @@ action.OnServerEvent:Connect(function(player: Player,verb: any,arg: any)
   if verb=="Sync" then push(player); return
   elseif verb=="Mine" and typeof(arg)=="Instance" then success=Mine.hit(player,arg)
   elseif verb=="Sell" and Mine.nearSell(player) then success=B.sell(player)
+  elseif verb=="VisitSell" then success=Mine.goSell(player)
   elseif verb=="Rank" then success=R.buy(player)
   elseif verb=="Prestige" and arg=="CONFIRM_RESET" then success=P.buy(player); if success then Mine.teleport(player,1) end
   elseif verb=="Shop" and type(arg)=="string" and #arg&lt;=20 then success=S.buy(player,arg)
@@ -200,7 +257,14 @@ action.OnServerEvent:Connect(function(player: Player,verb: any,arg: any)
   elseif verb=="Setting" and type(arg)=="string" and (arg=="Music" or arg=="Effects" or arg=="Motion") then
    success=Data.transaction(player,function(p: any) p.Settings[arg]=not p.Settings[arg]; return true end)
   end
-  if verb~="Mine" then notice:FireClient(player,if success then "Done!" else "Unavailable: check cost, access, capacity, or stand near Sell.") end
+  if verb~="Mine" then
+   local messages={Shop="Upgrade equipped.",Rank="New rank unlocked!",Visit="Back at the quarry.",VisitSell="Ready to sell your haul.",Setting="Preference saved.",Daily="Daily reward claimed.",Code="Code redeemed.",Reset="Safe reset scheduled.",Prestige="A fresh start!",VIP="Welcome to the quiet corner."}
+   if success then
+    if messages[verb] then notice:FireClient(player,messages[verb]) end
+   else
+    notice:FireClient(player,if verb=="Sell" then "Stand near the green sell counter with ore in your bag." else "Not available yet. Check the requirement shown in the menu.")
+   end
+  end
   push(player)
  end)
  working[player]=nil
@@ -218,11 +282,11 @@ end)
 </ProtectedString>
       </Properties>
     </Item>
-    <Item class="Folder" referent="RBX8">
+    <Item class="Folder" referent="RBX9">
       <Properties>
         <string name="Name">Services</string>
       </Properties>
-      <Item class="ModuleScript" referent="RBX9">
+      <Item class="ModuleScript" referent="RBX10">
         <Properties>
           <string name="Name">AnalyticsService</string>
           <ProtectedString name="Source">--!strict
@@ -248,7 +312,7 @@ return A
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX10">
+      <Item class="ModuleScript" referent="RBX11">
         <Properties>
           <string name="Name">BackpackService</string>
           <ProtectedString name="Source">--!strict
@@ -282,7 +346,7 @@ return B
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX11">
+      <Item class="ModuleScript" referent="RBX12">
         <Properties>
           <string name="Name">DataService</string>
           <ProtectedString name="Source">--!strict
@@ -395,7 +459,7 @@ return Data
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX12">
+      <Item class="ModuleScript" referent="RBX13">
         <Properties>
           <string name="Name">EconomyService</string>
           <ProtectedString name="Source">--!strict
@@ -422,7 +486,7 @@ return E
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX13">
+      <Item class="ModuleScript" referent="RBX14">
         <Properties>
           <string name="Name">LeaderboardService</string>
           <ProtectedString name="Source">--!strict
@@ -451,21 +515,18 @@ return L
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX14">
+      <Item class="ModuleScript" referent="RBX15">
         <Properties>
           <string name="Name">MineService</string>
           <ProtectedString name="Source">--!strict
 local Tags=game:GetService("CollectionService")
 local Players=game:GetService("Players")
 local C=require(game.ReplicatedStorage.Shared.Config)
+local Art=require(script.Parent.WorldArt)
 local M: any = {Mines={},Blocks={},Last={},Visits={},Current={},Random=Random.new()}
 local function part(name: string,size: Vector3,position: Vector3,color: Color3,parent: Instance): Part
  local p=Instance.new("Part"); p.Name=name; p.Size=size; p.Position=position
  p.Color=color; p.Anchored=true; p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth; p.Parent=parent; return p
-end
-local function label(p: BasePart,text: string)
- local gui=Instance.new("BillboardGui"); gui.Size=UDim2.fromOffset(260,65); gui.StudsOffset=Vector3.new(0,5,0); gui.AlwaysOnTop=true; gui.MaxDistance=100; gui.Parent=p
- local t=Instance.new("TextLabel"); t.Size=UDim2.fromScale(1,1); t.BackgroundTransparency=1; t.Text=text; t.TextColor3=Color3.new(1,1,1); t.TextStrokeTransparency=0.3; t.TextScaled=true; t.Font=Enum.Font.GothamBold; t.Parent=gui
 end
 function M.new(data: any,bag: any,analytics: any) M.Data=data; M.Bag=bag; M.A=analytics end
 function M.safe(tier: number): Vector3 return Vector3.new((tier-1)*90,5,24) end
@@ -502,6 +563,7 @@ function M.reset(tier: number)
     for i,ore in C.Ores do roll-=ore.Weight; if roll&lt;=0 then index=i; break end end
     local ore=C.Ores[index]
     local b=part(ore.Name,Vector3.one*C.BlockSize,Vector3.new(mine.X+(x-2.5)*4,-2-y*4,(z-2.5)*4),ore.Color,mine.Folder)
+    Art.ore(b,index,tier)
     b:SetAttribute("Health",ore.Health); b:SetAttribute("MaxHealth",ore.Health); b:SetAttribute("Tier",tier)
     Tags:AddTag(b,"MineBlock")
     M.Blocks[b]={Tier=tier,Ore=index,Health=ore.Health,Generation=mine.Generation}
@@ -518,35 +580,29 @@ function M.reset(tier: number)
   end
  end
 end
+function M.goSell(player: Player): boolean
+ local p=M.Data.read(player); if not p then return false end
+ local tier=M.Current[player] or 1
+ if tier&gt;p.Rank then return false end
+ local mine=M.Mines[tier]; local character=player.Character
+ local human=character and character:FindFirstChildOfClass("Humanoid")
+ if not mine or not character or not human or human.Health&lt;=0 then return false end
+ local destination=mine.Sell.Position+Vector3.new(0,4,-1)
+ character:PivotTo(CFrame.lookAt(destination,destination+Vector3.new(0,0,1)))
+ M.Current[player]=tier; return true
+end
 function M.build()
  local world=Instance.new("Folder"); world.Name="YardworkWorld"; world.Parent=workspace
- local lighting=game:GetService("Lighting"); lighting.ClockTime=14; lighting.Brightness=2
- lighting.Ambient=Color3.fromRGB(130,144,170)
- local atmosphere=Instance.new("Atmosphere"); atmosphere.Density=0.2; atmosphere.Parent=lighting
- local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.15; bloom.Threshold=1.5; bloom.Parent=lighting
+ Art.lighting()
  local count=if C.Prototype then 1 else 26
  for tier=1,count do
   local x=(tier-1)*90
-  part("Courtyard",Vector3.new(76,2,68),Vector3.new(x,-14,5),Color3.fromRGB(91,111,121),world)
-  -- Safe rim at y=0 with a central opening into the mine.
-  part("Front",Vector3.new(60,2,16),Vector3.new(x,-1,21),Color3.fromRGB(216,192,146),world)
-  part("Back",Vector3.new(60,2,12),Vector3.new(x,-1,-19),Color3.fromRGB(216,192,146),world)
-  for _,dx in {-22,22} do part("Side",Vector3.new(16,2,24),Vector3.new(x+dx,-1,0),Color3.fromRGB(216,192,146),world) end
-  local sell=part("SellZone",Vector3.new(10,0.3,8),Vector3.new(x-18,0.2,22),Color3.fromRGB(75,214,163),world); label(sell,"SELL • tap Sell All")
-  Tags:AddTag(sell,"SellZone")
-  local sign=part("MineSign",Vector3.new(3,5,1),Vector3.new(x,3,-21),Color3.fromRGB(36,91,108),world)
-  label(sign,"Mine "..string.char(64+tier))
-  local region=part("MineRegion",Vector3.new(24,12,24),Vector3.new(x,-6,0),Color3.new(),world)
-  region.Transparency=1; region.CanCollide=false; region.CanQuery=false; region:SetAttribute("Tier",tier); Tags:AddTag(region,"MineRegion")
+  local yard=Art.yard(world,x,tier)
+  yard.Prompt.Triggered:Connect(function(player: Player)
+   if M.PromptSell then M.PromptSell(player) end
+  end)
   local folder=Instance.new("Folder"); folder.Name="Blocks"..tier; folder.Parent=world
-  M.Mines[tier]={X=x,Folder=folder,Sell=sell,Next=0,Resetting=false,Generation=0}
-  if tier==1 then
-   local spawn=Instance.new("SpawnLocation"); spawn.Size=Vector3.new(7,1,7); spawn.Position=Vector3.new(x,0.5,25); spawn.Anchored=true; spawn.Neutral=true; spawn.Parent=world
-   local lounge=part("VIPLounge",Vector3.new(20,2,20),Vector3.new(-50,-1,25),Color3.fromRGB(139,111,62),world); label(lounge,"VIP • cosmetic lounge")
-   local counter=part("Workshop",Vector3.new(8,5,4),Vector3.new(x+20,2.5,25),Color3.fromRGB(43,137,151),world); label(counter,"WORKSHOP • use Shop")
-   local guard=part("Warden",Vector3.new(3,4,2),Vector3.new(x+10,2,27),Color3.fromRGB(61,85,118),world)
-   part("Head",Vector3.new(2,2,2),Vector3.new(x+10,5,27),Color3.fromRGB(246,205,156),world); label(guard,"Welcome! Mine, sell, grow.")
-  end
+  M.Mines[tier]={X=x,Folder=folder,Sell=yard.Sell,Next=0,Resetting=false,Generation=0}
   M.reset(tier)
  end
  task.spawn(function()
@@ -609,7 +665,7 @@ return M
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX15">
+      <Item class="ModuleScript" referent="RBX16">
         <Properties>
           <string name="Name">MonetizationService</string>
           <ProtectedString name="Source">--!strict
@@ -661,7 +717,7 @@ return M
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX16">
+      <Item class="ModuleScript" referent="RBX17">
         <Properties>
           <string name="Name">PrestigeService</string>
           <ProtectedString name="Source">--!strict
@@ -681,7 +737,7 @@ return P
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX17">
+      <Item class="ModuleScript" referent="RBX18">
         <Properties>
           <string name="Name">RankService</string>
           <ProtectedString name="Source">--!strict
@@ -700,7 +756,7 @@ return R
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX18">
+      <Item class="ModuleScript" referent="RBX19">
         <Properties>
           <string name="Name">RetentionService</string>
           <ProtectedString name="Source">--!strict
@@ -737,7 +793,7 @@ return R
 </ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX19">
+      <Item class="ModuleScript" referent="RBX20">
         <Properties>
           <string name="Name">ShopService</string>
           <ProtectedString name="Source">--!strict
@@ -768,221 +824,691 @@ return S
 </ProtectedString>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="RBX21">
+        <Properties>
+          <string name="Name">WorldArt</string>
+          <ProtectedString name="Source">--!strict
+-- Original faceted environment kit. No external asset IDs, plugins, or MeshService needed.
+local Tags=game:GetService("CollectionService")
+local A: any={}
+local P={Sand=Color3.fromRGB(216,194,151),Light=Color3.fromRGB(235,217,176),Stone=Color3.fromRGB(125,143,137),
+ Dark=Color3.fromRGB(47,68,69),Teal=Color3.fromRGB(52,119,112),Timber=Color3.fromRGB(132,91,61),
+ Copper=Color3.fromRGB(198,115,66),Mint=Color3.fromRGB(110,195,143),Gold=Color3.fromRGB(231,181,74),White=Color3.fromRGB(248,240,214)}
+local function model(parent: Instance,name: string): Model local m=Instance.new("Model"); m.Name=name; m.Parent=parent; return m end
+local function part(parent: Instance,name: string,size: Vector3,cf: CFrame,color: Color3,shape: string?,collide: boolean?): BasePart
+ local p=Instance.new(if shape=="Wedge" then "WedgePart" else "Part") :: BasePart
+ p.Name=name; p.Size=size; p.CFrame=cf; p.Color=color; p.Anchored=true; p.Material=Enum.Material.SmoothPlastic
+ p.CanCollide=collide~=false; p.CanTouch=false; p.CanQuery=collide~=false
+ if p:IsA("Part") then p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth; if shape=="Cylinder" then p.Shape=Enum.PartType.Cylinder end end
+ p.Parent=parent; return p
+end
+local function sign(parent: Instance,name: string,cf: CFrame,size: Vector3,heading: string,sub: string,color: Color3?)
+ local board=part(parent,name,size,cf,color or P.Dark,nil,false)
+ local surface=Instance.new("SurfaceGui"); surface.Name="Lettering"; surface.Face=Enum.NormalId.Front; surface.SizingMode=Enum.SurfaceGuiSizingMode.PixelsPerStud; surface.PixelsPerStud=45; surface.LightInfluence=0; surface.Parent=board
+ local text=Instance.new("TextLabel"); text.BackgroundTransparency=1; text.Size=UDim2.fromScale(.92,.55); text.Position=UDim2.fromScale(.04,.08); text.Font=Enum.Font.GothamBold; text.TextScaled=true; text.TextColor3=P.White; text.Text=heading; text.Parent=surface
+ local small=text:Clone(); small.Position=UDim2.fromScale(.04,.65); small.Size=UDim2.fromScale(.92,.24); small.Font=Enum.Font.GothamMedium; small.Text=sub; small.TextColor3=P.Mint; small.Parent=surface
+ return board
+end
+local function rock(parent: Instance,cf: CFrame,scale: number,color: Color3)
+ local group=model(parent,"FacetedRock")
+ part(group,"Core",Vector3.new(2.4,1.9,2.1)*scale,cf*CFrame.Angles(.12,.2,.1),color,"Wedge",false)
+ part(group,"Facet",Vector3.new(1.6,1.4,1.8)*scale,cf*CFrame.new(.8*scale,.1*scale,.1*scale)*CFrame.Angles(.1,2.4,.15),color:Lerp(P.Light,.15),"Wedge",false)
+ return group
+end
+local function tree(parent: Instance,cf: CFrame)
+ local group=model(parent,"QuarryTree")
+ part(group,"Trunk",Vector3.new(.8,5,.8),cf*CFrame.new(0,2.5,0),P.Timber,nil,false)
+ for i=0,3 do
+  part(group,"LeafFacet",Vector3.new(3.5,3,3.5),cf*CFrame.new(math.cos(i*math.pi/2)*.7,5.1+(i%2)*.7,math.sin(i*math.pi/2)*.7)*CFrame.Angles(0,i*math.pi/2,0),P.Mint:Lerp(P.Teal,i*.13),"Wedge",false)
+ end
+end
+local function crate(parent: Instance,cf: CFrame,scale: number?)
+ local s=scale or 1; local group=model(parent,"SupplyCrate")
+ part(group,"Box",Vector3.one*2.3*s,cf,P.Timber,nil,false)
+ for _,y in {-1,1} do part(group,"Rim",Vector3.new(2.5,.22,2.5)*s,cf*CFrame.new(0,y*s,0),P.Light,nil,false) end
+ part(group,"Brace",Vector3.new(.25,2.6,.15)*s,cf*CFrame.new(0,0,-1.18*s)*CFrame.Angles(0,0,.7),P.Dark,nil,false)
+end
+local function lamp(parent: Instance,cf: CFrame)
+ part(parent,"LampPost",Vector3.new(.3,6,.3),cf*CFrame.new(0,3,0),P.Dark,nil,false)
+ part(parent,"LanternFrame",Vector3.new(1,1.1,1),cf*CFrame.new(0,6,0),P.Dark,nil,false)
+ local bulb=part(parent,"Lamp",Vector3.new(.72,.7,.72),cf*CFrame.new(0,6.05,-.1),P.Gold,nil,false); bulb.Material=Enum.Material.Neon
+ -- No per-lamp shadow lights; warm emissive details remain cheap on mobile.
+end
+local function roof(parent: Instance,cf: CFrame,width: number,depth: number,color: Color3)
+ part(parent,"RoofLeft",Vector3.new(width/2+1,.35,depth),cf*CFrame.new(-width/4,0,0)*CFrame.Angles(0,0,.2),color,nil,false)
+ part(parent,"RoofRight",Vector3.new(width/2+1,.35,depth),cf*CFrame.new(width/4,0,0)*CFrame.Angles(0,0,-.2),color:Lerp(P.Dark,.15),nil,false)
+ part(parent,"RoofRidge",Vector3.new(.55,.4,depth+.1),cf*CFrame.new(0,width*.05,0),color,nil,false)
+end
+local function stall(parent: Instance,cf: CFrame,title: string,subtitle: string,color: Color3): Model
+ local group=model(parent,title.."Stall")
+ part(group,"Counter",Vector3.new(9,3.2,4),cf*CFrame.new(0,1.6,0),P.Timber,nil,true)
+ part(group,"Countertop",Vector3.new(9.5,.45,4.5),cf*CFrame.new(0,3.4,0),P.Light,nil,true)
+ for _,x in {-4.4,4.4} do part(group,"Upright",Vector3.new(.45,7,.45),cf*CFrame.new(x,3.5,.8),P.Timber,nil,false) end
+ roof(group,cf*CFrame.new(0,7.3,0),10,6,color)
+ sign(group,"ShopSign",cf*CFrame.new(0,5.35,-1.2),Vector3.new(7.6,1.9,.25),title,subtitle)
+ for _,x in {-3,-1,1,3} do part(group,"CounterPanel",Vector3.new(.12,2.4,.1),cf*CFrame.new(x,1.6,-2.06),P.Light,nil,false) end
+ return group
+end
+local function tower(parent: Instance,cf: CFrame)
+ local group=model(parent,"GuardTower")
+ for _,x in {-2.2,2.2} do for _,z in {-2.2,2.2} do part(group,"Support",Vector3.new(.65,11,.65),cf*CFrame.new(x,5.5,z),P.Timber,nil,false) end end
+ part(group,"Cabin",Vector3.new(6,3.2,6),cf*CFrame.new(0,11,0),P.Light,nil,false)
+ for _,x in {-1.5,1.5} do part(group,"Window",Vector3.new(1.7,1.5,.12),cf*CFrame.new(x,11.3,-3.08),P.Teal,nil,false) end
+ part(group,"Deck",Vector3.new(7,.45,7),cf*CFrame.new(0,9.3,0),P.Dark,nil,false)
+ roof(group,cf*CFrame.new(0,13.2,0),8,8,P.Teal)
+end
+local function guard(parent: Instance,cf: CFrame)
+ local m=model(parent,"WardenMilo")
+ for _,x in {-.45,.45} do
+  part(m,"Boot",Vector3.new(.72,.45,1),cf*CFrame.new(x,.24,-.1),P.Dark,nil,false)
+  part(m,"Trouser",Vector3.new(.68,1.45,.68),cf*CFrame.new(x,1.15,0),P.Teal,nil,false)
+ end
+ part(m,"Uniform",Vector3.new(1.8,1.8,.9),cf*CFrame.new(0,2.7,0),P.Teal,nil,false)
+ for _,x in {-1.17,1.17} do
+  part(m,"Sleeve",Vector3.new(.55,1.3,.65),cf*CFrame.new(x,2.8,0)*CFrame.Angles(0,0,if x&lt;0 then -.15 else .15),P.Teal,nil,false)
+  part(m,"Hand",Vector3.new(.5,.5,.55),cf*CFrame.new(x,1.95,0),Color3.fromRGB(227,181,136),nil,false)
+ end
+ part(m,"Head",Vector3.new(1.3,1.25,1.15),cf*CFrame.new(0,4.2,0),Color3.fromRGB(227,181,136),nil,false)
+ for _,x in {-.25,.25} do part(m,"Eye",Vector3.new(.1,.13,.04),cf*CFrame.new(x,4.3,-.59),P.Dark,nil,false) end
+ part(m,"Smile",Vector3.new(.25,.06,.04),cf*CFrame.new(0,3.95,-.59),P.Dark,nil,false)
+ part(m,"Cap",Vector3.new(1.5,.45,1.4),cf*CFrame.new(0,4.95,0),P.Dark,nil,false)
+ part(m,"Visor",Vector3.new(1.6,.12,.7),cf*CFrame.new(0,4.78,-.65),P.Teal,nil,false)
+ part(m,"Badge",Vector3.new(.25,.35,.08),cf*CFrame.new(.45,3,-.5),P.Gold,nil,false)
+ sign(m,"Nameplate",cf*CFrame.new(0,6.15,0),Vector3.new(4,1.1,.15),"WARDEN MILO","Small steps. Big rocks.")
+end
+function A.lighting()
+ local lighting=game:GetService("Lighting"); lighting.ClockTime=15; lighting.Brightness=2.3
+ lighting.Ambient=Color3.fromRGB(125,137,147); lighting.OutdoorAmbient=Color3.fromRGB(151,155,143)
+ lighting.EnvironmentDiffuseScale=.7; lighting.EnvironmentSpecularScale=.35; lighting.ShadowSoftness=.45
+ for _,name in {"YardAtmosphere","YardBloom","YardGrade"} do local old=lighting:FindFirstChild(name); if old then old:Destroy() end end
+ local air=Instance.new("Atmosphere"); air.Name="YardAtmosphere"; air.Density=.22; air.Offset=.15; air.Color=Color3.fromRGB(231,222,194); air.Decay=Color3.fromRGB(153,170,173); air.Parent=lighting
+ local bloom=Instance.new("BloomEffect"); bloom.Name="YardBloom"; bloom.Intensity=.12; bloom.Size=18; bloom.Threshold=1.8; bloom.Parent=lighting
+ local grade=Instance.new("ColorCorrectionEffect"); grade.Name="YardGrade"; grade.Saturation=.08; grade.Contrast=.06; grade.TintColor=Color3.fromRGB(255,247,230); grade.Parent=lighting
+end
+function A.yard(parent: Instance,x: number,tier: number): any
+ local group=model(parent,"Quarry_"..string.char(64+tier))
+ local cf=CFrame.new(x,0,0)
+ local tint=P.Teal:Lerp(Color3.fromHSV(((tier-1)*.075+.38)%1,.45,.65),.3)
+ part(group,"Foundation",Vector3.new(80,2,80),cf*CFrame.new(0,-14,2),P.Stone,nil,true)
+ part(group,"FrontPlaza",Vector3.new(76,2,28),cf*CFrame.new(0,-1,27),P.Sand,nil,true)
+ part(group,"RearPlaza",Vector3.new(76,2,28),cf*CFrame.new(0,-1,-27),P.Sand,nil,true)
+ for _,dx in {-26,26} do part(group,"SideWalk",Vector3.new(24,2,26),cf*CFrame.new(dx,-1,0),P.Sand,nil,true) end
+ -- A dark pit liner and staggered stone bands make the mine read as an excavated quarry.
+ for _,y in {-3,-7,-11} do
+  for _,dx in {-12.8,12.8} do part(group,"PitStone",Vector3.new(1.4,3.8,26),cf*CFrame.new(dx,y,0),P.Stone:Lerp(P.Dark,math.abs(y)/24),nil,true) end
+  for _,dz in {-12.8,12.8} do part(group,"PitStone",Vector3.new(24,3.8,1.4),cf*CFrame.new(0,y,dz),P.Stone:Lerp(P.Dark,math.abs(y)/24),nil,true) end
+ end
+ for _,dx in {-13.7,13.7} do part(group,"TimberRim",Vector3.new(.65,.7,28),cf*CFrame.new(dx,.3,0),P.Timber,nil,true) end
+ for _,dz in {-13.7,13.7} do part(group,"TimberRim",Vector3.new(28,.7,.65),cf*CFrame.new(0,.3,dz),P.Timber,nil,true) end
+ for i=-5,5 do
+  part(group,"SafetyMark",Vector3.new(.9,.05,.65),cf*CFrame.new(i*2.3,.69,13.7)*CFrame.Angles(0,-.45,0),if i%2==0 then P.Gold else P.Dark,nil,false)
+ end
+ -- Tall entrance with a readable sign behind the excavation, facing the spawn.
+ for _,dx in {-14.7,14.7} do
+  part(group,"EntrancePost",Vector3.new(1.3,10,1.3),cf*CFrame.new(dx,5,-15.4),P.Timber,nil,true)
+  part(group,"Footing",Vector3.new(2.2,1.2,2.2),cf*CFrame.new(dx,.6,-15.4),P.Stone,nil,true)
+ end
+ part(group,"EntranceBeam",Vector3.new(32,1.3,1.4),cf*CFrame.new(0,10,-15.4),P.Timber,nil,false)
+ sign(group,"MineSign",cf*CFrame.new(0,9,-14.5)*CFrame.Angles(0,math.pi,0),Vector3.new(12,2.8,.35),"QUARRY "..string.char(64+tier),"MINE • SELL • MOVE UP",tint)
+ for _,dx in {-34,34} do
+  part(group,"BoundaryWall",Vector3.new(2,7,67),cf*CFrame.new(dx,3.5,-1),P.Light,nil,true)
+  part(group,"WallCap",Vector3.new(2.8,.6,67),cf*CFrame.new(dx,7,-1),tint,nil,false)
+ end
+ part(group,"BackWall",Vector3.new(67,7,2),cf*CFrame.new(0,3.5,-34),P.Light,nil,true)
+ part(group,"BackCap",Vector3.new(68,.6,2.8),cf*CFrame.new(0,7,-34),tint,nil,false)
+ for _,dx in {-22,-11,0,11,22} do
+  part(group,"CellWindow",Vector3.new(5,2.8,.1),cf*CFrame.new(dx,4.4,-32.95),P.Dark,nil,false)
+  for j=-1,1 do part(group,"WindowBar",Vector3.new(.12,2.9,.18),cf*CFrame.new(dx+j*1.25,4.4,-32.8),P.Stone,nil,false) end
+ end
+ tower(group,cf*CFrame.new(-30,0,-29))
+ -- Faceted outcrops create a quarry silhouette without importing heavy meshes.
+ for i=1,6 do
+  rock(group,cf*CFrame.new(-30+i*9,-2,-40)*CFrame.Angles(0,i*.8,0),3+(i%3)*1.1,P.Stone:Lerp(P.Teal,.18))
+ end
+ for _,dx in {-27,27} do tree(group,cf*CFrame.new(dx,0,-15)) end
+ for _,dx in {-15,15} do
+  local planter=model(group,"YardPlanter")
+  part(planter,"Planter",Vector3.new(4,.9,2),cf*CFrame.new(dx,.45,37),P.Copper,nil,false)
+  for j=-1,1 do part(planter,"Shrub",Vector3.new(1.3,1.2,1.5),cf*CFrame.new(dx+j,1.3,37)*CFrame.Angles(0,j*.8,0),P.Mint,"Wedge",false) end
+ end
+
+ -- Front plaza: separate sell stall and workshop with unobstructed routes.
+ local sellStall=stall(group,cf*CFrame.new(-20,0,30),"ORE EXCHANGE","SELL YOUR HAUL",P.Mint)
+ local sell=part(group,"SellZone",Vector3.new(10,.15,7),cf*CFrame.new(-20,.09,23),P.Mint,nil,false)
+ Tags:AddTag(sell,"SellZone")
+ local prompt=Instance.new("ProximityPrompt"); prompt.Name="SellPrompt"; prompt.ActionText="Sell all ore"; prompt.ObjectText="Ore Exchange"; prompt.KeyboardKeyCode=Enum.KeyCode.E; prompt.MaxActivationDistance=10; prompt.RequiresLineOfSight=false; prompt.Parent=sell
+ local shop=stall(group,cf*CFrame.new(20,0,30),"THE WORKSHOP","BETTER GEAR. BIGGER HAULS.",tint)
+ local anvil=part(shop,"Anvil",Vector3.new(2,.65,1.3),cf*CFrame.new(20,3.9,30),P.Dark,nil,false)
+ part(shop,"AnvilTop",Vector3.new(3,.4,1.5),anvil.CFrame*CFrame.new(0,.4,0),P.Stone,nil,false)
+ local workshopPrompt=Instance.new("ProximityPrompt"); workshopPrompt.Name="WorkshopPrompt"; workshopPrompt.ActionText="Upgrade gear"; workshopPrompt.ObjectText="The Workshop"; workshopPrompt.KeyboardKeyCode=Enum.KeyCode.E; workshopPrompt.MaxActivationDistance=10; workshopPrompt.RequiresLineOfSight=false; workshopPrompt.Parent=anvil
+ crate(group,cf*CFrame.new(-28,1.2,21)*CFrame.Angles(0,.2,0))
+ crate(group,cf*CFrame.new(28,1.2,23)*CFrame.Angles(0,-.3,0),.8)
+ local cart=model(group,"OreCart")
+ part(cart,"Hopper",Vector3.new(3.3,1.8,2.4),cf*CFrame.new(24,1.8,15),P.Dark,nil,false)
+ part(cart,"HopperLip",Vector3.new(3.6,.25,2.7),cf*CFrame.new(24,2.8,15),tint,nil,false)
+ for _,dx in {-1.2,1.2} do for _,dz in {-1.1,1.1} do part(cart,"Wheel",Vector3.new(.4,.9,.9),cf*CFrame.new(24+dx,.6,15+dz),P.Timber,"Cylinder",false) end end
+ rock(cart,cf*CFrame.new(24,3,15),.6,P.Copper)
+ for i=1,5 do
+  local side=if i%2==0 then -1 else 1
+  rock(group,cf*CFrame.new(side*28,.8,-20+i*6)*CFrame.Angles(0,i,0),.6+(i%3)*.25,P.Stone)
+ end
+ for _,dx in {-29,29} do lamp(group,cf*CFrame.new(dx,0,5)) end
+ for _,dx in {-19,19} do
+  part(group,"BenchSeat",Vector3.new(6,.4,1.6),cf*CFrame.new(dx,1.5,-24),P.Timber,nil,false)
+  for _,leg in {-2,2} do part(group,"BenchLeg",Vector3.new(.4,1.5,1.5),cf*CFrame.new(dx+leg,.75,-24),P.Dark,nil,false) end
+ end
+ guard(group,cf*CFrame.new(8,0,30))
+ -- Shallow stair on the front of the plaza; a clean sightline faces the mine.
+ for i=1,3 do part(group,"WelcomePaver",Vector3.new(6,.07,2.4),cf*CFrame.new(0,.06,18+i*5),P.Light,nil,false) end
+ local region=part(group,"MineRegion",Vector3.new(24,12,24),cf*CFrame.new(0,-6,0),P.Dark,nil,false)
+ region.Transparency=1; region:SetAttribute("Tier",tier); Tags:AddTag(region,"MineRegion")
+ if tier==1 then
+  local spawn=Instance.new("SpawnLocation"); spawn.Name="YardSpawn"; spawn.Size=Vector3.new(6,.2,6); spawn.Position=Vector3.new(x,.1,24); spawn.Anchored=true; spawn.Neutral=true; spawn.Transparency=1; spawn.CanCollide=false; spawn.Duration=0; spawn.Parent=group
+  part(group,"VIPPlinth",Vector3.new(18,14,18),CFrame.new(-50,-7,25),P.Stone,nil,true)
+  part(group,"VIPDeck",Vector3.new(18,.4,18),CFrame.new(-50,.2,25),P.Timber,nil,true)
+  for _,dx in {-57,-43} do for _,dz in {18,32} do part(group,"LoungePost",Vector3.new(.55,7,.55),CFrame.new(dx,3.5,dz),P.Timber,nil,false) end end
+  roof(group,CFrame.new(-50,7.3,25),19,19,P.Teal)
+  sign(group,"VIPSign",CFrame.new(-50,3,31),Vector3.new(9,2,.4),"THE QUIET CORNER","VIP LOUNGE",P.Teal)
+ end
+ return {Sell=sell,Prompt=prompt}
+end
+function A.ore(block: BasePart,index: number,tier: number)
+ block.Material=if index==1 then Enum.Material.Sandstone else Enum.Material.Slate
+ local shade=Color3.fromHSV(((tier-1)*.075+.38)%1,.25,.65)
+ if tier&gt;1 then block.Color=block.Color:Lerp(shade,.15) end
+ if index==1 then return end
+ local tint=if index==2 then P.Copper else P.Mint
+ local ore=part(block,"OreVein",Vector3.new(1.1,.45,1.5),block.CFrame*CFrame.new(.45,block.Size.Y/2+.1,.15)*CFrame.Angles(0,.55,0),tint,"Wedge",false)
+ if index==3 then
+  ore.Material=Enum.Material.Neon
+  part(block,"CrystalFacet",Vector3.new(.7,.8,.8),block.CFrame*CFrame.new(-.6,block.Size.Y/2+.2,-.5)*CFrame.Angles(.15,-.35,.15),P.Mint,"Wedge",false)
+ end
+end
+function A.pickaxe(tool: Tool)
+ local handle=part(tool,"Handle",Vector3.new(.32,3.1,.38),CFrame.new(),P.Timber,nil,false)
+ local function attach(name: string,size: Vector3,cf: CFrame,color: Color3,shape: string?)
+  local p=part(tool,name,size,cf,color,shape,false); p.Anchored=false; p.Massless=true
+  local weld=Instance.new("WeldConstraint"); weld.Part0=handle; weld.Part1=p; weld.Parent=p; return p
+ end
+ handle.Anchored=false; handle.Massless=true
+ attach("Blade",Vector3.new(2.4,.5,.6),CFrame.new(0,1.1,0),P.Stone)
+ attach("LeftTip",Vector3.new(.8,.65,.6),CFrame.new(-1.45,.99,0)*CFrame.Angles(0,0,.4),P.Stone,"Wedge")
+ attach("RightTip",Vector3.new(.8,.65,.6),CFrame.new(1.45,.99,0)*CFrame.Angles(0,math.pi,-.4),P.Stone,"Wedge")
+ for _,y in {-.9,-.6,-.3} do attach("Grip",Vector3.new(.4,.14,.45),CFrame.new(0,y,0),P.Dark) end
+ attach("Collar",Vector3.new(.55,.65,.65),CFrame.new(0,1.1,0),P.Teal)
+end
+function A.stylePickaxe(tool: Tool,tier: number,gold: boolean)
+ local stamp=tostring(tier)..":"..tostring(gold)
+ if tool:GetAttribute("ArtStyle")==stamp then return end
+ tool:SetAttribute("ArtStyle",stamp)
+ local colors={P.Stone,P.Copper,P.Teal,P.Mint}
+ for _,name in {"Blade","LeftTip","RightTip"} do
+  local p=tool:FindFirstChild(name)
+  if p and p:IsA("BasePart") then p.Color=if gold then P.Gold else colors[math.clamp(tier,1,#colors)] end
+ end
+ local config=require(game.ReplicatedStorage.Shared.Config)
+ tool.Name=config.Picks[tier].Name
+end
+return A
+</ProtectedString>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="RBX20">
+  <Item class="StarterPlayer" referent="RBX22">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="RBX21">
+    <Item class="StarterPlayerScripts" referent="RBX23">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="RBX22">
+      <Item class="LocalScript" referent="RBX24">
         <Properties>
           <string name="Name">Game</string>
           <ProtectedString name="Source">--!strict
 local Players=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
 local Input=game:GetService("UserInputService")
-local Tween=game:GetService("TweenService")
 local Market=game:GetService("MarketplaceService")
+local Tween=game:GetService("TweenService")
 local Debris=game:GetService("Debris")
+local Tags=game:GetService("CollectionService")
 local player=Players.LocalPlayer
 local C=require(RS:WaitForChild("Shared"):WaitForChild("Config"))
 local remotes=RS:WaitForChild("YardworkRemotes")
 local action=remotes:WaitForChild("Action") :: RemoteEvent
 local state=remotes:WaitForChild("State") :: RemoteEvent
 local notice=remotes:WaitForChild("Notice") :: RemoteEvent
+local HUD=require(script.Parent:WaitForChild("HUDController"))
+local hud=HUD.new(function(verb: string,arg: any?) action:FireServer(verb,arg) end)
+hud.Purchase=function(kind: string,id: number)
+ if kind=="Pass" then Market:PromptGamePassPurchase(player,id) else Market:PromptProductPurchase(player,id) end
+end
+game:GetService("ProximityPromptService").PromptTriggered:Connect(function(prompt: ProximityPrompt)
+ if prompt.Name=="WorkshopPrompt" then hud.open("Gear") end
+end)
 local current: any=nil
 local held=false
-local auto=false
-local confirmed=false
-local page="Shop"
-local lastTarget: BasePart?=nil
-local gui=Instance.new("ScreenGui"); gui.Name="YardworkUI"; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=false; gui.Parent=player:WaitForChild("PlayerGui")
-local function text(parent: Instance,content: string,size: UDim2): TextLabel
- local t=Instance.new("TextLabel"); t.Size=size; t.BackgroundTransparency=1; t.Text=content; t.TextColor3=Color3.fromRGB(245,247,240); t.Font=Enum.Font.GothamBold; t.TextSize=16; t.TextWrapped=true; t.Parent=parent; return t
-end
-local function button(parent: Instance,content: string,callback: ()-&gt;()): TextButton
- local b=Instance.new("TextButton"); b.Size=UDim2.new(1,-8,0,46); b.BackgroundColor3=Color3.fromRGB(34,119,132); b.TextColor3=Color3.new(1,1,1); b.Font=Enum.Font.GothamBold; b.TextSize=15; b.TextWrapped=true; b.Text=content; b.Parent=parent
- local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,10); corner.Parent=b
- b.Activated:Connect(callback); return b
-end
-local hud=Instance.new("Frame"); hud.Size=UDim2.new(0.96,0,0,116); hud.Position=UDim2.fromScale(0.02,0); hud.BackgroundColor3=Color3.fromRGB(27,42,62); hud.Parent=gui
-local summary=text(hud,"Loading profile…",UDim2.new(1,-10,0,58)); summary.Position=UDim2.fromOffset(5,0)
-local hint=text(hud,"Mine a block → visit the green sell pad → upgrade.",UDim2.new(1,-10,0,32)); hint.Position=UDim2.fromOffset(5,58); hint.TextSize=13
-local bar=Instance.new("Frame"); bar.Position=UDim2.new(0.02,0,1,-17); bar.Size=UDim2.new(0.96,0,0,10); bar.BackgroundColor3=Color3.fromRGB(60,65,78); bar.Parent=hud
-local fill=Instance.new("Frame"); fill.Size=UDim2.fromScale(0,1); fill.BackgroundColor3=Color3.fromRGB(80,223,164); fill.Parent=bar
-local toast=text(gui,"",UDim2.new(0.85,0,0,58)); toast.Position=UDim2.fromScale(0.075,0.3); toast.TextStrokeTransparency=0.4
-local toastId=0
+local lastPosition: Vector3?=nil
+local lastColor=Color3.fromRGB(206,222,208)
+local audio=Instance.new("Folder"); audio.Name="YardworkAudio"; audio.Parent=player:WaitForChild("PlayerGui")
 local function sound(name: string)
  if not current or not current.Settings.Effects or C.Audio[name]==0 then return end
- local s=Instance.new("Sound"); s.SoundId="rbxassetid://"..C.Audio[name]; s.Volume=0.35; s.Parent=gui; s:Play(); Debris:AddItem(s,5)
+ local s=Instance.new("Sound"); s.SoundId="rbxassetid://"..C.Audio[name]; s.Volume=.3; s.Parent=audio; s:Play(); Debris:AddItem(s,5)
 end
-local function notify(message: string)
- toastId+=1; local id=toastId; toast.Text=message
- if current and current.Settings.Motion then toast.TextTransparency=1; Tween:Create(toast,TweenInfo.new(0.15),{TextTransparency=0}):Play() else toast.TextTransparency=0 end
- task.delay(3,function() if id==toastId then toast.Text="" end end)
-end
-local controls=Instance.new("Frame"); controls.Size=UDim2.new(0.35,0,0,156); controls.AnchorPoint=Vector2.new(1,1); controls.Position=UDim2.new(0.98,0,1,-175); controls.BackgroundTransparency=1; controls.Parent=gui
-local cl=Instance.new("UIListLayout"); cl.Padding=UDim.new(0,5); cl.Parent=controls
-local mineButton=button(controls,"Hold to mine",function() end)
-button(controls,"Sell All (near pad)",function() action:FireServer("Sell") end)
-local panel=Instance.new("Frame"); panel.Size=UDim2.fromScale(0.9,0.62); panel.Position=UDim2.fromScale(0.05,0.2); panel.BackgroundColor3=Color3.fromRGB(27,42,62); panel.Visible=false; panel.Parent=gui
-local title=text(panel,"WORKSHOP",UDim2.new(1,-65,0,42))
-local close=button(panel,"X",function() panel.Visible=false end); close.Size=UDim2.fromOffset(48,42); close.Position=UDim2.new(1,-52,0,0)
-local scroll=Instance.new("ScrollingFrame"); scroll.Position=UDim2.fromOffset(6,48); scroll.Size=UDim2.new(1,-12,1,-54); scroll.BackgroundTransparency=1; scroll.ScrollBarThickness=6; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.CanvasSize=UDim2.new(); scroll.Parent=panel
-local layout=Instance.new("UIListLayout"); layout.Padding=UDim.new(0,6); layout.Parent=scroll
-local function clear() for _,child in scroll:GetChildren() do if child~=layout then child:Destroy() end end end
-local function line(s: string) text(scroll,s,UDim2.new(1,-10,0,52)) end
-local function render()
- if not current then return end
- clear(); title.Text=string.upper(page)
- local p=current
- if page=="Shop" then
-  local pick=C.Picks[p.Pick+1]; local bag=C.BagCosts[p.Bag+1]
-  if pick and (not C.Prototype or p.Pick&lt;3) then button(scroll,"Pick: "..pick.Name.." • $"..pick.Cost,function() action:FireServer("Shop","Pick") end) end
-  if bag and (not C.Prototype or p.Bag&lt;3) then button(scroll,"Backpack: "..C.Bags[p.Bag+1].." • $"..bag,function() action:FireServer("Shop","Bag") end) end
-  if not C.Prototype then
-   for _,name in {"Fortune","Chain","Burst","Capacity","Skin","Pet"} do
-    local cost=C.TokenPrices[name]*(p.Enchants[name]+1)
-    button(scroll,name.." Lv "..p.Enchants[name].." • "..cost.." tokens",function() action:FireServer("Shop",name) end)
-   end
-  end
-  if p.Rank&lt;C.RankCount then
-   button(scroll,"Rank up to "..string.char(65+p.Rank).." • $"..C.rankCost(p.Rank),function() action:FireServer("Rank") end)
-  else line(if C.Prototype then "Prototype complete! Reach C and help test the loop." else "Rank Z reached! Prestige is available below.") end
-  button(scroll,"Prestige details",function() page="Prestige"; confirmed=false; render() end)
-  if p.Passes.VIP then button(scroll,"Visit VIP lounge",function() action:FireServer("VIP") end) end
-  button(scroll,"Choose mine",function() page="Mines"; render() end)
-  button(scroll,"Rewards &amp; codes",function() page="Rewards"; render() end)
-  button(scroll,"Passes &amp; products",function() page="Store"; render() end)
-  button(scroll,"Leaderboards",function() page="Leaders"; render() end)
-  button(scroll,"Settings",function() page="Settings"; render() end)
- elseif page=="Mines" then
-  button(scroll,"Return to safety",function() action:FireServer("Visit",1) end)
-  for tier=1,(if C.Prototype then 1 else p.Rank) do
-   button(scroll,"Visit Mine "..string.char(64+tier),function() action:FireServer("Visit",tier) end)
-  end
- elseif page=="Prestige" then
-  line("Requires Z and $"..C.prestigeCost(p.Prestiges)..". Grants 10 tokens (20 with pass) and +20% sell bonus, capped at 5x.")
-  line("RESETS money, rank, cash pickaxe, cash backpack, and unsold ore. Keeps tokens, enchants, cosmetics, passes and statistics.")
-  button(scroll,if confirmed then "CONFIRM: erase listed progress" else "I understand the resets",function()
-   if confirmed then action:FireServer("Prestige","CONFIRM_RESET"); confirmed=false else confirmed=true end; render()
-  end)
- elseif page=="Rewards" then
-  line("Daily streak: "..p.Streak.." • claim once per UTC day. Prototype rewards are disabled.")
-  button(scroll,"Claim daily reward",function() action:FireServer("Daily") end)
-  local box=Instance.new("TextBox"); box.Size=UDim2.new(1,-8,0,48); box.PlaceholderText="Enter code"; box.Text=""; box.TextSize=18; box.Parent=scroll
-  button(scroll,"Redeem code",function() action:FireServer("Code",box.Text) end)
-  button(scroll,"Use reset credit (30s warning) • owned "..p.ResetCredits,function() action:FireServer("Reset") end)
- elseif page=="Store" then
-  line("Optional purchases. All progression is free. Boost time expires even while offline. Check Roblox's prompt for the actual price.")
-  for name,id in pairs(C.Passes) do
-   if id&gt;0 then button(scroll,name..(if p.Passes[name] then " • Owned" else " • view price"),function() if not p.Passes[name] then Market:PromptGamePassPurchase(player,id) end end) end
-  end
-  for _,product in C.Products do
-   if product.Id&gt;0 then button(scroll,product.Name.." • view price",function() Market:PromptProductPurchase(player,product.Id) end) end
-  end
-  line("No options? Purchase IDs have not been configured. No payment is needed to play.")
- elseif page=="Settings" then
-  for _,key in {"Music","Effects","Motion"} do
-   button(scroll,key..": "..tostring(p.Settings[key]),function() action:FireServer("Setting",key) end)
-  end
-  button(scroll,"Auto-target: "..tostring(auto).." (Auto pass)",function() if p.Passes.Auto then auto=not auto; render() else notify("Free hold-to-mine is always available.") end end)
- elseif page=="Leaders" then
-  for _,metric in {"Money","Rank","Prestiges"} do
-   line(metric.." — refreshes about every 2 minutes")
-   for i,entry in (p.Leaders[metric] or {}) do line(i..". User "..entry.key.." • "..entry.value) end
-  end
- end
- if page~="Shop" then button(scroll,"Back",function() page="Shop"; render() end) end
-end
-button(controls,"Workshop / ranks",function() panel.Visible=not panel.Visible; page="Shop"; render() end)
 local function target(): BasePart?
  local camera=workspace.CurrentCamera; if not camera then return nil end
+ local last=Input:GetLastInputType()
  local ray: Ray
- if Input.TouchEnabled or Input.GamepadEnabled then ray=camera:ViewportPointToRay(camera.ViewportSize.X/2,camera.ViewportSize.Y/2)
+ if Input.TouchEnabled or string.find(last.Name,"Gamepad") then ray=camera:ViewportPointToRay(camera.ViewportSize.X/2,camera.ViewportSize.Y/2)
  else local pos=Input:GetMouseLocation(); ray=camera:ScreenPointToRay(pos.X,pos.Y) end
  local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude
  params.FilterDescendantsInstances=if player.Character then {player.Character} else {}
- local result=workspace:Raycast(ray.Origin,ray.Direction*80,params)
- if result and result.Instance:GetAttribute("Health") then return result.Instance end
+ local hit=workspace:Raycast(ray.Origin,ray.Direction*80,params)
+ if hit and hit.Instance:GetAttribute("Health") then return hit.Instance end
  return nil
 end
-local cross=text(gui,"+",UDim2.fromOffset(24,24)); cross.AnchorPoint=Vector2.new(0.5,0.5); cross.Position=UDim2.fromScale(0.5,0.5)
-local health=text(gui,"",UDim2.fromOffset(180,30)); health.AnchorPoint=Vector2.new(0.5,0); health.Position=UDim2.fromScale(0.5,0.54)
-local function holding(input: InputObject): boolean return input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 end
-mineButton.InputBegan:Connect(function(i) if holding(i) then held=true end end)
 Input.InputBegan:Connect(function(i,processed)
- if processed then return end
+ if hud.isOpen() and i.KeyCode==Enum.KeyCode.ButtonB then hud.close(); return end
+ if processed or Input:GetFocusedTextBox() then return end
+ if i.KeyCode==Enum.KeyCode.B or i.KeyCode==Enum.KeyCode.ButtonY then hud.open("Gear") end
+ if i.KeyCode==Enum.KeyCode.M then hud.open("Mines") end
+ if i.KeyCode==Enum.KeyCode.N then hud.open("More") end
+ if i.KeyCode==Enum.KeyCode.ButtonX then
+  if current and current.NearSell then action:FireServer("Sell") else action:FireServer("VisitSell") end
+ end
  if i.UserInputType==Enum.UserInputType.MouseButton1 or i.KeyCode==Enum.KeyCode.ButtonR2 then held=true end
- if i.KeyCode==Enum.KeyCode.ButtonY then panel.Visible=not panel.Visible; render() end
- if i.KeyCode==Enum.KeyCode.ButtonX then action:FireServer("Sell") end
 end)
 Input.InputEnded:Connect(function(i)
- if holding(i) or i.KeyCode==Enum.KeyCode.ButtonR2 then held=false end
+ if i.UserInputType==Enum.UserInputType.MouseButton1 or i.KeyCode==Enum.KeyCode.ButtonR2 then held=false end
 end)
 Input.WindowFocusReleased:Connect(function() held=false end)
-notice.OnClientEvent:Connect(notify)
+notice.OnClientEvent:Connect(hud.notify)
 state.OnClientEvent:Connect(function(p: any)
- local old=current; current=p
+ local old=current; current=p; hud.update(p)
  if old and p.Count&gt;old.Count then
   sound("Break")
-  if p.Settings.Effects and lastTarget then
-   local marker=Instance.new("Part"); marker.Anchored=true; marker.CanCollide=false; marker.CanQuery=false; marker.Shape=Enum.PartType.Ball; marker.Size=Vector3.one; marker.Color=Color3.fromRGB(90,240,180); marker.Position=lastTarget.Position; marker.Parent=workspace
-   Tween:Create(marker,TweenInfo.new(0.3),{Size=Vector3.one*3,Transparency=1}):Play(); Debris:AddItem(marker,0.4)
+  if p.Settings.Effects and lastPosition then
+   for i=1,4 do
+    local chip=Instance.new("Part"); chip.Name="OreChip"; chip.Anchored=true; chip.CanCollide=false; chip.CanQuery=false; chip.CanTouch=false
+    chip.Size=Vector3.one*.25; chip.Material=Enum.Material.SmoothPlastic; chip.Color=lastColor; chip.Position=lastPosition; chip.Parent=workspace
+    local direction=Vector3.new(math.cos(i*1.6)*1.8,1+i*.15,math.sin(i*1.6)*1.8)
+    Tween:Create(chip,TweenInfo.new(.35),{Position=chip.Position+direction,Transparency=1,Size=Vector3.one*.08}):Play(); Debris:AddItem(chip,.4)
+   end
   end
  end
- local reset=p.Resets[p.MineTier]
- summary.Text=string.format("$%d • %d tokens • Rank %s • Prestige %d\nBag %d/%d • reset %ds",p.Money,p.Tokens,string.char(64+p.Rank),p.Prestiges,p.Count,p.Capacity,reset or 0)
- fill.Size=UDim2.fromScale(math.clamp(p.Count/p.Capacity,0,1),1)
- hint.Text=if p.Count==0 then "Mine blocks → sell at the green pad → buy upgrades." elseif p.Count&gt;=p.Capacity then "Backpack full! Use Return to safety, then visit Sell." else "Next rank: "..(if p.Rank&lt;C.RankCount then "$"..C.rankCost(p.Rank) else "goal reached!")
- if reset and reset&lt;=30 then hint.Text="Mine reset in "..reset.."s — return to the rim." end
- if old and p.Money&gt;old.Money then sound("Sell"); notify("+$"..(p.Money-old.Money)) end
- if old and p.Rank&gt;old.Rank then sound("Rank"); notify("Rank "..string.char(64+p.Rank).." unlocked!") end
- -- Refresh buttons only after local mutations, not on every two-second state update while typing.
- if panel.Visible and page~="Rewards" then render() end
- if player.Character then
-  local tool=player.Character:FindFirstChildOfClass("Tool")
-  if tool then tool.Name=C.Picks[p.Pick].Name end
+ if old and p.Money&gt;old.Money then
+  sound("Sell"); hud.notify((if p.Count&lt;old.Count then "Sold your ore! +$" else "+$")..tostring(math.floor(p.Money-old.Money)))
  end
+ if old and p.Rank&gt;old.Rank then sound("Rank"); hud.notify("Rank "..string.char(64+p.Rank).." unlocked. Nice work!") end
 end)
-local pet: Part?=nil
-local music=Instance.new("Sound"); music.Name="YardAmbience"; music.Looped=true; music.Volume=0.15; music.Parent=gui
+local pet: Model?=nil
+local music=Instance.new("Sound"); music.Name="YardAmbience"; music.Looped=true; music.Volume=.15; music.Parent=audio
 if C.Audio.Music&gt;0 then music.SoundId="rbxassetid://"..C.Audio.Music; music:Play() end
+local function buddy(): Model
+ local model=Instance.new("Model"); model.Name="WorkshopBuddy"
+ local function piece(name: string,size: Vector3,position: Vector3,color: Color3)
+  local p=Instance.new("Part"); p.Name=name; p.Size=size; p.CFrame=CFrame.new(position); p.Color=color; p.Anchored=true; p.CanCollide=false; p.CanQuery=false; p.CanTouch=false; p.Parent=model; return p
+ end
+ model.PrimaryPart=piece("Body",Vector3.new(1.2,1.1,1.2),Vector3.zero,Color3.fromRGB(239,188,78))
+ piece("Hat",Vector3.new(1.4,.2,1.4),Vector3.new(0,.65,0),Color3.fromRGB(40,129,101))
+ for _,x in {-.25,.25} do piece("Eye",Vector3.new(.12,.17,.08),Vector3.new(x,.1,-.62),Color3.fromRGB(30,48,57)) end
+ model.Parent=workspace; return model
+end
 task.spawn(function()
  while true do
-  task.wait(0.12)
+  task.wait(.12)
   if current then
-   music.Volume=if current.Settings.Music then 0.15 else 0
+   music.Volume=if current.Settings.Music then .15 else 0
    local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
    if current.Enchants.Pet&gt;0 and root and root:IsA("BasePart") then
-    if not pet then pet=Instance.new("Part"); pet.Name="WorkshopBuddy"; pet.Size=Vector3.new(1.4,1.4,1.4); pet.Anchored=true; pet.CanCollide=false; pet.CanQuery=false; pet.Color=Color3.fromRGB(237,181,78); pet.Parent=workspace end
-    pet.CFrame=root.CFrame*CFrame.new(3,1+(if current.Settings.Motion then math.sin(os.clock()*2)*0.3 else 0),2)
+    if not pet then pet=buddy() end
+    pet:PivotTo(root.CFrame*CFrame.new(3,1+(if current.Settings.Motion then math.sin(os.clock()*2)*.2 else 0),2))
    elseif pet then pet:Destroy(); pet=nil end
-   local tool=player.Character and player.Character:FindFirstChildOfClass("Tool")
-   local blade=tool and tool:FindFirstChild("Blade")
-   if blade and blade:IsA("BasePart") then blade.Color=if current.Enchants.Skin&gt;0 then Color3.fromRGB(242,185,72) else Color3.fromRGB(117,206,210) end
   end
-  local block=target(); lastTarget=block
-  health.Text=if block then block.Name.." "..tostring(block:GetAttribute("Health")).." HP" else ""
-  if current and (held or (auto and current.Passes.Auto)) and not panel.Visible then
-   if not block and auto and player.Character then
+  local block=target(); hud.target(block)
+  if block then lastPosition=block.Position; lastColor=block.Color end
+  if current and (held or hud.Held or (hud.Auto and current.Passes.Auto)) and not hud.isOpen() then
+   if not block and hud.Auto and player.Character then
     local root=player.Character:FindFirstChild("HumanoidRootPart")
     if root and root:IsA("BasePart") then
-     local nearest=C.Reach
-     for _,candidate in game:GetService("CollectionService"):GetTagged("MineBlock") do
-      if candidate:IsA("BasePart") then local distance=(candidate.Position-root.Position).Magnitude; if distance&lt;nearest then nearest=distance; block=candidate end end
+     local closest=C.Reach
+     for _,candidate in Tags:GetTagged("MineBlock") do
+      if candidate:IsA("BasePart") then
+       local distance=(candidate.Position-root.Position).Magnitude
+       if distance&lt;closest then closest=distance; block=candidate end
+      end
      end
     end
    end
-   if block then action:FireServer("Mine",block) end
+   if block then lastPosition=block.Position; lastColor=block.Color; action:FireServer("Mine",block) end
   end
  end
 end)
 action:FireServer("Sync")
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX25">
+        <Properties>
+          <string name="Name">HUDController</string>
+          <ProtectedString name="Source">--!strict
+local Players=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local Tween=game:GetService("TweenService")
+local GuiService=game:GetService("GuiService")
+local Input=game:GetService("UserInputService")
+local C=require(RS.Shared.Config)
+local Layout=require(RS.Shared.HUDLayout)
+local HUD: any={}
+local P={Paper=Color3.fromRGB(248,246,237),Ink=Color3.fromRGB(30,48,57),Muted=Color3.fromRGB(100,114,116),
+ Green=Color3.fromRGB(40,129,101),Mint=Color3.fromRGB(209,235,217),Gold=Color3.fromRGB(239,188,78),
+ Line=Color3.fromRGB(223,226,215),Orange=Color3.fromRGB(185,94,49),Grey=Color3.fromRGB(231,231,221)}
+local function make(class: string,props: any,parent: Instance?): any
+ local node=Instance.new(class)
+ for key,value in pairs(props) do (node :: any)[key]=value end
+ node.Parent=parent; return node
+end
+local function round(node: Instance,r: number)
+ local existing=node:FindFirstChildOfClass("UICorner")
+ if existing then (existing :: UICorner).CornerRadius=UDim.new(0,r) else make("UICorner",{CornerRadius=UDim.new(0,r)},node) end
+end
+local function stroke(node: Instance,color: Color3,thickness: number?) make("UIStroke",{Color=color,Thickness=thickness or 1,Transparency=0.2},node) end
+local function frame(parent: Instance,color: Color3,radius: number?): Frame
+ local f=make("Frame",{BackgroundColor3=color,BorderSizePixel=0},parent); if radius then round(f,radius) end; return f
+end
+local function label(parent: Instance,content: string,size: number,color: Color3?): TextLabel
+ return make("TextLabel",{BackgroundTransparency=1,BorderSizePixel=0,Text=content,TextSize=size,Font=Enum.Font.GothamMedium,
+ TextColor3=color or P.Ink,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextTruncate=Enum.TextTruncate.AtEnd},parent)
+end
+local function place(node: GuiObject,x: number,y: number,w: number,h: number)
+ node.Position=UDim2.fromOffset(x,y); node.Size=UDim2.fromOffset(w,h)
+end
+local function rectangle(node: GuiObject,r: any) place(node,r.X,r.Y,r.W,r.H) end
+local function pill(parent: Instance,content: string,callback: ()-&gt;(),color: Color3?): TextButton
+ local b=make("TextButton",{BackgroundColor3=color or P.Green,BorderSizePixel=0,Text=content,TextSize=14,TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamBold,AutoButtonColor=false,Selectable=true},parent)
+ round(b,12)
+ b.Activated:Connect(callback)
+ b.MouseEnter:Connect(function() if b.Active then Tween:Create(b,TweenInfo.new(0.1),{BackgroundTransparency=0.12}):Play() end end)
+ b.MouseLeave:Connect(function() Tween:Create(b,TweenInfo.new(0.1),{BackgroundTransparency=0}):Play() end)
+ local selection=frame(b,P.Gold,12); selection.BackgroundTransparency=1; selection.Size=UDim2.fromScale(1,1); stroke(selection,P.Gold,3); selection.Visible=false
+ b.SelectionGained:Connect(function() selection.Visible=true end); b.SelectionLost:Connect(function() selection.Visible=false end)
+ return b
+end
+local function icon(parent: Instance,kind: string,color: Color3,size: number): Frame
+ local root=frame(parent,color); root.BackgroundTransparency=1; root.Size=UDim2.fromOffset(size,size)
+ local function shape(x: number,y: number,w: number,h: number,r: number?,rotation: number?): Frame
+  local f=frame(root,color,r); f.Position=UDim2.fromScale(x,y); f.Size=UDim2.fromScale(w,h); f.Rotation=rotation or 0; return f
+ end
+ if kind=="Pick" then shape(.44,.18,.13,.68,3,38); shape(.16,.12,.68,.17,3,38)
+ elseif kind=="Bag" then local body=shape(.2,.33,.6,.56,5); shape(.35,.1,.3,.32,4); local stripe=frame(body,P.Paper,2); stripe.Position=UDim2.fromScale(.2,.38); stripe.Size=UDim2.fromScale(.6,.13)
+ elseif kind=="Mine" then shape(.1,.12,.13,.76,2); shape(.77,.12,.13,.76,2); shape(.08,.12,.84,.16,2); shape(.38,.56,.3,.3,1,45)
+ elseif kind=="Menu" then for n=0,2 do shape(.18,.2+n*.25,.64,.1,3) end
+ elseif kind=="Coin" then local circle=shape(.08,.08,.84,.84,50); local dollar=label(circle,"$",math.floor(size*.64),P.Ink); dollar.Size=UDim2.fromScale(1,1); dollar.TextXAlignment=Enum.TextXAlignment.Center; dollar.Font=Enum.Font.GothamBold
+ elseif kind=="Token" then shape(.24,.24,.52,.52,3,45)
+ end
+ return root
+end
+function HUD.new(send: (string,any?)-&gt;()): any
+ local self: any={Data=nil,Page="Gear",Bindings={},Signature="",Held=false,Confirmed=false,Auto=false,ToastId=0}
+ local gui=make("ScreenGui",{Name="YardworkUI",ResetOnSpawn=false,IgnoreGuiInset=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling,DisplayOrder=10},Players.LocalPlayer:WaitForChild("PlayerGui"))
+ local root=frame(gui,P.Paper); root.BackgroundTransparency=1; root.Size=UDim2.fromScale(1,1)
+ local wallet=frame(root,P.Paper,16); stroke(wallet,P.Line)
+ local coin=icon(wallet,"Coin",P.Gold,34); coin.Position=UDim2.fromOffset(12,14)
+ local balance=label(wallet,"Loading…",24); balance.Font=Enum.Font.GothamBold; place(balance,56,4,150,32)
+ local tokens=label(wallet,"0 tokens",12,P.Muted); place(tokens,58,34,140,20)
+ local rankCard=frame(root,P.Ink,16)
+ local badge=frame(rankCard,P.Gold,11); place(badge,10,10,44,44)
+ local rankLetter=label(badge,"A",25); rankLetter.Font=Enum.Font.GothamBlack; rankLetter.TextXAlignment=Enum.TextXAlignment.Center; rankLetter.Size=UDim2.fromScale(1,1)
+ local rankName=label(rankCard,"NEW ARRIVAL",12,P.Paper); rankName.Font=Enum.Font.GothamBold; place(rankName,65,9,158,22)
+ local resetLabel=label(rankCard,"Mine A · 5:00",12,Color3.fromRGB(190,207,202)); place(resetLabel,65,31,158,20)
+ local objective=frame(root,P.Paper,14); stroke(objective,P.Line)
+ local goalCaption=label(objective,"YOUR NEXT STEP",10,P.Green); goalCaption.Font=Enum.Font.GothamBold; place(goalCaption,14,5,260,17)
+ local goalText=label(objective,"Mine a few blocks to get started",13); place(goalText,14,22,270,23)
+ local progress=frame(objective,P.Line,3); progress.Position=UDim2.new(0,14,1,-10); progress.Size=UDim2.new(1,-28,0,4)
+ local progressFill=frame(progress,P.Green,3); progressFill.Size=UDim2.fromScale(0,1)
+ local nav=frame(root,P.Paper); nav.BackgroundTransparency=1
+ local navButtons={}
+ local open: (string)-&gt;()
+ for _,entry in {{"Gear","Upgrades","Pick"},{"Mines","Mines","Mine"},{"More","Menu","Menu"}} do
+  local b=pill(nav,"",function() open(entry[1]) end,P.Paper); stroke(b,P.Line)
+  local symbol=icon(b,entry[3],P.Green,26); symbol.Name="Symbol"
+  local caption=label(b,entry[2],12); caption.Name="Caption"; caption.Font=Enum.Font.GothamBold
+  table.insert(navButtons,b)
+ end
+ local bag=frame(root,P.Paper,16); stroke(bag,P.Line)
+ local bagSymbol=icon(bag,"Bag",P.Green,29); bagSymbol.Position=UDim2.fromOffset(12,10)
+ local bagTitle=label(bag,"BACKPACK",10,P.Muted); place(bagTitle,49,7,115,18)
+ local bagCount=label(bag,"0 / 30",16); bagCount.Font=Enum.Font.GothamBold; place(bagCount,49,24,160,23)
+ local bagBar=frame(bag,P.Line,4); bagBar.Position=UDim2.new(0,14,1,-13); bagBar.Size=UDim2.new(1,-142,0,5)
+ local bagFill=frame(bagBar,P.Green,4); bagFill.Size=UDim2.fromScale(0,1)
+ local sell=pill(bag,"Go to sell",function()
+  if not self.Data or self.Data.Count==0 then self.notify("Mine some ore first."); return end
+  if self.Data.NearSell then send("Sell") else send("VisitSell"); self.notify("At the sell stall — press Sell all to cash in.") end
+ end)
+ sell.AnchorPoint=Vector2.new(1,0.5); sell.Position=UDim2.new(1,-10,.5,0); sell.Size=UDim2.fromOffset(112,46)
+ local mineButton=pill(root,"",function() end,P.Green); round(mineButton,22)
+ local mineIcon=icon(mineButton,"Pick",P.Paper,35); place(mineIcon,21,8,35,35)
+ local mineCaption=label(mineButton,"HOLD",11,P.Paper); mineCaption.Font=Enum.Font.GothamBold; mineCaption.TextXAlignment=Enum.TextXAlignment.Center; place(mineCaption,0,47,76,20)
+ local cross=label(root,"+",23,P.Paper); cross.TextXAlignment=Enum.TextXAlignment.Center; cross.AnchorPoint=Vector2.new(.5,.5); cross.Position=UDim2.fromScale(.5,.5); cross.Size=UDim2.fromOffset(24,24); cross.TextStrokeTransparency=.65
+ local targetCard=frame(root,P.Ink,10); targetCard.AnchorPoint=Vector2.zero; targetCard.Position=UDim2.new(.5,0,.5,28); targetCard.Size=UDim2.fromOffset(170,43); targetCard.Visible=false
+ local targetName=label(targetCard,"",12,P.Paper); place(targetName,10,3,150,21); targetName.Size=UDim2.new(1,-20,0,21); targetName.TextXAlignment=Enum.TextXAlignment.Center
+ local hp=frame(targetCard,Color3.fromRGB(65,82,86),4); place(hp,12,29,146,5); hp.Size=UDim2.new(1,-24,0,5)
+ local hpFill=frame(hp,P.Mint,4); hpFill.Size=UDim2.fromScale(1,1)
+ local highlight=make("Highlight",{FillTransparency=.92,FillColor=P.Mint,OutlineColor=P.Paper,OutlineTransparency=.15,DepthMode=Enum.HighlightDepthMode.Occluded,Enabled=false},workspace)
+ local toast=frame(gui,P.Ink,14); toast.AnchorPoint=Vector2.new(.5,0); toast.Size=UDim2.fromOffset(330,48); toast.Position=UDim2.new(.5,0,0,92); toast.Visible=false
+ local toastText=label(toast,"",14,P.Paper); toastText.Position=UDim2.fromOffset(12,0); toastText.Size=UDim2.new(1,-24,1,0); toastText.TextXAlignment=Enum.TextXAlignment.Center; toastText.TextWrapped=true
+ local overlay=make("TextButton",{Size=UDim2.fromScale(1,1),BackgroundColor3=P.Ink,BackgroundTransparency=.35,Text="",AutoButtonColor=false,Visible=false,Selectable=false},gui)
+ local panel=frame(overlay,P.Paper,20); stroke(panel,P.Line)
+ local panelTitle=label(panel,"UPGRADES",23); panelTitle.Font=Enum.Font.GothamBold; place(panelTitle,22,14,460,30)
+ local panelSub=label(panel,"Better tools. Bigger hauls.",12,P.Muted); place(panelSub,22,48,460,20)
+ local close=pill(panel,"×",function() self.close() end,P.Ink); close.AnchorPoint=Vector2.new(1,0); close.Position=UDim2.new(1,-14,0,14); close.Size=UDim2.fromOffset(44,44); close.TextSize=24
+ local scroll=make("ScrollingFrame",{BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(16,84),Size=UDim2.new(1,-32,1,-100),ScrollBarThickness=4,ScrollBarImageColor3=P.Green,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},panel)
+ local list=make("UIListLayout",{Padding=UDim.new(0,10),SortOrder=Enum.SortOrder.LayoutOrder},scroll)
+ make("UIPadding",{PaddingRight=UDim.new(0,6),PaddingBottom=UDim.new(0,6)},scroll)
+ local function compact(value: number): string
+  if value&gt;=1e9 then return string.format("%.1fB",value/1e9) elseif value&gt;=1e6 then return string.format("%.1fM",value/1e6) elseif value&gt;=10000 then return string.format("%.1fK",value/1000) end
+  local digits=tostring(math.floor(value)); local formatted=digits:reverse():gsub("(%d%d%d)","%1,"):reverse():gsub("^,",""); return formatted
+ end
+ function self.notify(message: string)
+  self.ToastId+=1; local id=self.ToastId; toastText.Text=message; toast.Visible=true
+  task.delay(3.2,function() if id==self.ToastId then toast.Visible=false end end)
+ end
+ local function info(title: string,body: string)
+  local card=frame(scroll,P.Grey,12); card.Size=UDim2.new(1,-2,0,92)
+  local heading=label(card,title,14); heading.Font=Enum.Font.GothamBold; place(heading,14,10,540,22); heading.Size=UDim2.new(1,-28,0,22)
+  local desc=label(card,body,12,P.Muted); desc.Position=UDim2.fromOffset(14,36); desc.Size=UDim2.new(1,-28,0,48); desc.TextWrapped=true; desc.TextTruncate=Enum.TextTruncate.None; desc.TextYAlignment=Enum.TextYAlignment.Top
+ end
+ local function card(name: string,description: string,cta: string,callback: ()-&gt;(),affordable: ((any)-&gt;boolean)?): TextButton
+  local row=frame(scroll,Color3.fromRGB(255,254,248),14); row.Size=UDim2.new(1,-2,0,if self.Small then 116 else 90); stroke(row,P.Line)
+  local heading=label(row,name,15); heading.Font=Enum.Font.GothamBold; heading.Position=UDim2.fromOffset(14,10); heading.Size=UDim2.new(1,if self.Small then -28 else -140,0,25)
+  local detail=label(row,description,12,P.Muted); detail.Position=UDim2.fromOffset(14,37); detail.Size=UDim2.new(1,-142,0,40); detail.TextWrapped=true; detail.TextTruncate=Enum.TextTruncate.None; detail.TextYAlignment=Enum.TextYAlignment.Top
+  local b=pill(row,cta,function()
+   if affordable and not affordable(self.Data) then self.notify("Not enough currency yet — keep mining and selling."); return end
+   callback()
+  end)
+  b.AnchorPoint=Vector2.new(1,if self.Small then 1 else .5); b.Position=if self.Small then UDim2.new(1,-12,1,-12) else UDim2.new(1,-12,.5,0); b.Size=UDim2.fromOffset(112,46)
+  if affordable then
+   table.insert(self.Bindings,function(p: any)
+    local yes=affordable(p); b.BackgroundColor3=if yes then P.Green else P.Grey; b.TextColor3=if yes then P.Paper else P.Muted
+   end)
+  end
+  return b
+ end
+ local titles={Gear={"UPGRADES","Earn it. Equip it. Dig a little deeper."},Mines={"YOUR MINES","Choose an unlocked quarry. Return here any time."},More={"THE YARD","Rewards, settings and everything else."},Rewards={"REWARDS","A little extra for a good day's work."},Settings={"SETTINGS","Make the yard feel right for you."},Prestige={"A FRESH START","Read what resets before you graduate."},Store={"OPTIONAL EXTRAS","All progression is available through play."},Leaders={"YARD LEGENDS","Global snapshots update about every two minutes."}}
+ local render: ()-&gt;()
+ render=function()
+  if not self.Data then return end
+  local oldPosition=scroll.CanvasPosition
+  for _,child in scroll:GetChildren() do if child:IsA("GuiObject") then child:Destroy() end end
+  self.Bindings={}; local p=self.Data; local page=self.Page; local t=titles[page]
+  panelTitle.Text=t[1]; panelSub.Text=t[2]
+  if page=="Gear" then
+   local pick=C.Picks[p.Pick+1]
+   if pick and (not C.Prototype or p.Pick&lt;3) then
+    card(pick.Name,"Damage "..pick.Damage.." · "..pick.Interval.."s swing interval","$"..compact(pick.Cost),function() send("Shop","Pick") end,function(d) return d.Money&gt;=pick.Cost end)
+   else info("Pickaxe maxed","You've earned the best pickaxe available in this release.") end
+   local tier=p.Bag+1; local cost=C.BagCosts[tier]
+   if cost and (not C.Prototype or tier&lt;=3) then card("Bigger backpack",C.Bags[p.Bag].." → "..C.Bags[tier].." base capacity","$"..compact(cost),function() send("Shop","Bag") end,function(d) return d.Money&gt;=cost end)
+   else info("Backpack maxed","Your current bag is the largest available in this release.") end
+   if p.Rank&lt;C.RankCount then
+    local rankCost=C.rankCost(p.Rank)
+    card("Rank "..string.char(65+p.Rank),"Unlock a rank and a permanent sell perk.","$"..compact(rankCost),function() send("Rank") end,function(d) return d.Money&gt;=rankCost end)
+   else info("Rank goal reached!",if C.Prototype then "You've reached C. Keep upgrading and exploring the yard." else "Rank Z! You can now work toward prestige.") end
+   if not C.Prototype then
+    for _,name in {"Fortune","Chain","Burst","Capacity","Skin","Pet"} do
+     local level=p.Enchants[name]; local cap=if name=="Skin" or name=="Pet" then 1 else 5
+     if level&lt;cap then
+      local price=C.TokenPrices[name]*(level+1)
+      local descriptions={Fortune="Bonus ore chance",Chain="Break adjacent blocks",Burst="Bounded area break",Capacity="+15 base capacity",Skin="Golden pickaxe finish",Pet="A cosmetic workshop buddy"}
+      card(name.." · Lv "..level,descriptions[name],price.." tokens",function() send("Shop",name) end,function(d) return d.Tokens&gt;=price end)
+     end
+    end
+    card("Prestige","Permanent rewards. A new beginning.","Details",function() open("Prestige") end)
+   end
+  elseif page=="Mines" then
+   card("Back to the rim","Leave the pit safely with all your ore.","Return",function() send("Visit",p.MineTier) end)
+   card("Sell your haul","Travel to this mine's green sell counter.","Go to sell",function() send("VisitSell"); self.close() end)
+   for tier=1,(if C.Prototype then 1 else C.RankCount) do
+    local unlocked=tier&lt;=p.Rank
+    card("Mine "..string.char(64+tier),if unlocked then "Ready to explore" else "Reach rank "..string.char(64+tier).." to enter",if unlocked then "Travel" else "Locked",function()
+     if unlocked then send("Visit",tier); self.close() else self.notify("Rank up to unlock this mine.") end
+    end)
+   end
+   if p.Passes.VIP then card("VIP lounge","A quiet spot above the quarry.","Visit",function() send("VIP"); self.close() end) end
+  elseif page=="More" then
+   card("Daily rewards &amp; codes","Claim rewards and redeem a code.","Open",function() open("Rewards") end)
+   card("Settings","Sound, effects and reduced motion.","Open",function() open("Settings") end)
+   if not C.Prototype then
+    card("Yard legends","Money, rank and prestige leaderboards.","Open",function() open("Leaders") end)
+    card("Prestige","See your next long-term goal.","Details",function() open("Prestige") end)
+   end
+   local enabled=false; for _,id in pairs(C.Passes) do if id&gt;0 then enabled=true end end; for _,prod in C.Products do if prod.Id&gt;0 then enabled=true end end
+   if enabled then card("Optional extras","View passes and products. No purchase needed.","Browse",function() open("Store") end) end
+  elseif page=="Rewards" then
+   if C.Prototype then info("Coming with the next chapter","Daily rewards and codes unlock with expanded progression. Your mining progress still saves normally.") else
+    local claimed=p.Daily&gt;=math.floor(os.time()/86400)
+    card("Daily reward · "..p.Streak.." day streak",if claimed then "Claimed today. Come back next UTC day." else "Claim a free reward. No purchase required.",if claimed then "Claimed" else "Claim",function() if not claimed then send("Daily") end end)
+    local box=make("TextBox",{Size=UDim2.new(1,-2,0,50),BackgroundColor3=P.Grey,BorderSizePixel=0,Text="",PlaceholderText="Enter a reward code",TextColor3=P.Ink,PlaceholderColor3=P.Muted,Font=Enum.Font.GothamMedium,TextSize=15,ClearTextOnFocus=false},scroll); round(box,12)
+    card("Have a code?","Enter it above, then redeem.","Redeem",function() send("Code",box.Text) end)
+    if p.ResetCredits&gt;0 then card("Mine reset credits · "..p.ResetCredits,"Schedules a safe reset with a 30s warning.","Use credit",function() send("Reset") end) end
+   end
+  elseif page=="Settings" then
+   for _,entry in {{"Music","Background music"},{"Effects","Sound &amp; break effects"},{"Motion","Interface motion &amp; pet bobbing"}} do
+    local key=entry[1]
+    card(entry[2],if key=="Motion" then "Turn off for a calmer screen." else "Saved with your profile.",if p.Settings[key] then "On" else "Off",function() send("Setting",key) end)
+   end
+   if p.Passes.Auto then card("Auto-target","Nearby targets only. Hold-to-mine is always free.",if self.Auto then "On" else "Off",function() self.Auto=not self.Auto; render() end) end
+  elseif page=="Prestige" then
+   info("Requires Z + $"..compact(C.prestigeCost(p.Prestiges)),"Grants 10 tokens (20 with pass) and +20% permanent sell bonus, up to 5×.")
+   info("What resets","Money, rank, cash pickaxe, cash backpack and unsold ore. You keep tokens, token upgrades, cosmetics, passes and statistics.")
+   card(if self.Confirmed then "Confirm your fresh start" else "Ready to graduate?","This resets the progress listed above.",if self.Confirmed then "Confirm reset" else "Review reset",function()
+    if self.Confirmed then send("Prestige","CONFIRM_RESET"); self.Confirmed=false; self.close() else self.Confirmed=true; render() end
+   end,function(d) return not C.Prototype and d.Rank&gt;=26 and d.Money&gt;=C.prestigeCost(d.Prestiges) end)
+  elseif page=="Store" then
+   info("Only buy if you'd like to","Check Roblox's purchase prompt for the actual price. Boost time expires while offline; repeated boosts extend time, not strength.")
+   for _,name in {"Money","Tokens","Auto","Backpack","VIP"} do
+    local id=C.Passes[name]
+    if id&gt;0 then
+     local descriptions={Money="2× ore-sale money",Tokens="2× eligible prestige tokens",Auto="Optional nearby auto-targeting",Backpack="+50% bag capacity",VIP="Tag and cosmetic lounge"}
+     card(name.." pass",descriptions[name],if p.Passes[name] then "Owned" else "View price",function() if not self.Data.Passes[name] then self.Purchase("Pass",id) end end)
+    end
+   end
+   for _,product in C.Products do if product.Id&gt;0 then card(product.Name,"Optional developer product.","View price",function() self.Purchase("Product",product.Id) end) end end
+  elseif page=="Leaders" then
+   for _,metric in {"Money","Rank","Prestiges"} do
+    local entries=p.Leaders[metric] or {}
+    if #entries==0 then info(metric,"The board is warming up. Check again shortly.") end
+    for i,entry in entries do info(metric.." · #"..i,"User "..entry.key.." — "..compact(entry.value)) end
+   end
+  end
+  for _,binding in self.Bindings do binding(p) end
+  scroll.CanvasPosition=oldPosition
+ end
+ function self.close() overlay.Visible=false; root.Visible=true; self.Held=false; GuiService.SelectedObject=nil end
+ open=function(page: string)
+  self.Page=page; self.Confirmed=false; self.Signature=""; self.Held=false
+  overlay.Visible=true; root.Visible=false; render(); scroll.CanvasPosition=Vector2.zero
+  if Input:GetLastInputType()==Enum.UserInputType.Gamepad1 then GuiService.SelectedObject=close end
+ end
+ self.open=open
+ function self.isOpen(): boolean return overlay.Visible end
+ local function press(i: InputObject): boolean return i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 end
+ local mineInput: InputObject?=nil
+ mineButton.InputBegan:Connect(function(i) if press(i) and not mineInput then mineInput=i; self.Held=true end end)
+ Input.InputEnded:Connect(function(i) if i==mineInput then mineInput=nil; self.Held=false end end)
+ Input.WindowFocusReleased:Connect(function() mineInput=nil; self.Held=false end)
+ function self.target(block: BasePart?)
+  highlight.Adornee=block; highlight.Enabled=block~=nil and not overlay.Visible
+  targetCard.Visible=block~=nil
+  if block then
+   targetName.Text=block.Name.." · "..tostring(block:GetAttribute("Health")).." HP"
+   hpFill.Size=UDim2.fromScale(math.clamp((block:GetAttribute("Health") or 0)/math.max(1,block:GetAttribute("MaxHealth") or 1),0,1),1)
+  end
+ end
+ local function signature(p: any): string
+  local parts={self.Page,tostring(p.Pick),tostring(p.Bag),tostring(p.Rank),tostring(p.Streak),tostring(p.Daily),tostring(p.ResetCredits),tostring(p.MineTier)}
+  for _,key in {"Fortune","Chain","Burst","Capacity","Skin","Pet"} do table.insert(parts,tostring(p.Enchants[key])) end
+  for _,key in {"Music","Effects","Motion"} do table.insert(parts,tostring(p.Settings[key])) end
+  for _,key in {"Money","Tokens","Auto","Backpack","VIP"} do table.insert(parts,tostring(p.Passes[key])) end
+  return table.concat(parts,"|")
+ end
+ function self.update(p: any)
+  self.Data=p
+  balance.Text="$"..compact(p.Money); tokens.Text=compact(p.Tokens).." tokens"..(if p.Prestiges&gt;0 then " · P"..p.Prestiges else "")
+  rankLetter.Text=string.char(64+p.Rank)
+  rankName.Text=if p.Rank==1 then "NEW ARRIVAL" elseif p.Rank==2 then "YARD APPRENTICE" elseif p.Rank==3 then "TRUSTED DIGGER" else "RANK "..string.char(64+p.Rank)
+  local seconds=p.Resets[p.MineTier] or 0
+  resetLabel.Text=string.format("Mine %s · %d:%02d",string.char(64+p.MineTier),math.floor(seconds/60),seconds%60)
+  resetLabel.TextColor3=if seconds&lt;=30 then P.Gold else Color3.fromRGB(190,207,202)
+  local full=p.Count&gt;=p.Capacity
+  bagTitle.Text=if full then "BACKPACK FULL" else "BACKPACK"
+  bagTitle.TextColor3=if full then P.Orange else P.Muted; bagCount.Text=p.Count.." / "..p.Capacity
+  local color=if full then P.Orange else P.Green
+  bagFill.BackgroundColor3=color
+  local ratio=math.clamp(p.Count/p.Capacity,0,1)
+  if p.Settings.Motion then Tween:Create(bagFill,TweenInfo.new(.18),{Size=UDim2.fromScale(ratio,1)}):Play() else bagFill.Size=UDim2.fromScale(ratio,1) end
+  sell.Text=if p.NearSell then "Sell all" else "Go to sell"
+  goalCaption.Text=if full then "TIME TO CASH IN" elseif p.Rank&lt;C.RankCount then "NEXT RANK · "..string.char(65+p.Rank) else "YARD GOAL COMPLETE"
+  if full then goalText.Text="Sell your haul to make room." elseif p.Count==0 and p.Money==0 then goalText.Text="Aim at a block and hold to mine." elseif p.Rank&lt;C.RankCount then goalText.Text="$"..compact(p.Money).." / $"..compact(C.rankCost(p.Rank)).." · keep going!" else goalText.Text="Keep upgrading your gear." end
+  progressFill.Size=UDim2.fromScale(if p.Rank&lt;C.RankCount then math.clamp(p.Money/C.rankCost(p.Rank),0,1) else 1,1)
+  if overlay.Visible then
+   local key=signature(p)
+   -- Wallet ticks update bindings only: do not destroy focused controls every two seconds.
+   if key~=self.Signature then render(); self.Signature=key end
+   for _,binding in self.Bindings do binding(p) end
+  end
+ end
+ local function resize()
+  local size=root.AbsoluteSize; if size.X&lt;=0 or size.Y&lt;=0 then return end
+  local l=Layout.compute(size.X,size.Y)
+  local wasSmall=self.Small; self.Small=l.Modal.W&lt;420
+  for _,entry in {{wallet,l.Wallet},{rankCard,l.Rank},{objective,l.Goal},{nav,l.Nav},{bag,l.Bag},{mineButton,l.Mine},{panel,l.Modal},{targetCard,l.Target}} do rectangle(entry[1],entry[2]) end
+  objective.Visible=l.Goal.W&gt;=130
+  place(balance,52,if l.Landscape then 1 else 5,l.Wallet.W-62,30); balance.TextSize=if l.Phone then 21 else 24
+  place(tokens,54,if l.Landscape then 28 else 35,l.Wallet.W-64,18)
+  coin.Position=UDim2.fromOffset(10,if l.Landscape then 10 else 16)
+  place(badge,9,if l.Landscape then 7 else 11,40,40)
+  place(rankName,58,if l.Landscape then 6 else 12,l.Rank.W-64,20); rankName.TextSize=if l.Phone then 9 else 11
+  place(resetLabel,58,if l.Landscape then 27 else 34,l.Rank.W-64,18); resetLabel.TextSize=if l.Phone then 10 else 12
+  goalText.Size=UDim2.new(1,-28,0,23); goalCaption.Size=UDim2.new(1,-28,0,17)
+  for i,b in navButtons do
+   local horizontal=l.Landscape
+   local buttonW=if horizontal then l.NavSize else l.Nav.W
+   place(b,if horizontal then (i-1)*(l.NavSize+8) else 0,if horizontal then 0 else (i-1)*(l.NavSize+8),buttonW,l.NavSize)
+   local symbol=b:FindFirstChild("Symbol") :: Frame; local caption=b:FindFirstChild("Caption") :: TextLabel
+   if l.Phone or horizontal then place(symbol,(buttonW-25)/2,5,25,25); place(caption,0,l.NavSize-21,buttonW,18); caption.TextXAlignment=Enum.TextXAlignment.Center; caption.TextSize=10
+   else place(symbol,12,15,26,26); place(caption,48,0,80,l.NavSize); caption.TextXAlignment=Enum.TextXAlignment.Left; caption.TextSize=13 end
+  end
+  toast.Size=UDim2.fromOffset(math.min(350,size.X-32),48); toast.Position=UDim2.new(.5,0,0,if l.Landscape then 145 else 90)
+  panelTitle.Size=UDim2.new(1,-96,0,30); panelSub.Size=UDim2.new(1,-44,0,20)
+  if wasSmall~=self.Small and overlay.Visible then render() end
+ end
+ root:GetPropertyChangedSignal("AbsoluteSize"):Connect(resize); task.defer(resize)
+ return self
+end
+return HUD
 </ProtectedString>
         </Properties>
       </Item>

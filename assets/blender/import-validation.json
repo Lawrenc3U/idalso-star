@@ -1,0 +1,58 @@
+[
+  {
+    "file": "guard_tower.fbx",
+    "objects": 11,
+    "exported_triangles": 420,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "warden_milo.fbx",
+    "objects": 17,
+    "exported_triangles": 556,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "ore_cart.fbx",
+    "objects": 6,
+    "exported_triangles": 552,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "workshop_stall.fbx",
+    "objects": 14,
+    "exported_triangles": 488,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "sell_stall.fbx",
+    "objects": 12,
+    "exported_triangles": 400,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "supply_crate.fbx",
+    "objects": 4,
+    "exported_triangles": 144,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "yard_pickaxe.fbx",
+    "objects": 8,
+    "exported_triangles": 232,
+    "imported": true,
+    "outward_normals": true
+  },
+  {
+    "file": "quarry_tree.fbx",
+    "objects": 5,
+    "exported_triangles": 172,
+    "imported": true,
+    "outward_normals": true
+  }
+]

@@ -77,3 +77,9 @@ DataStore acquisition is now lazy and occurs inside the protected persistence pa
 - [ ] Current Creator Hub APIs, policies, content maturity settings and actual prices reviewed.
 
 Do not treat unchecked items as passed. Public monetization stays off until the relevant gates pass.
+
+## Visual refresh checks
+
+All 18 current Luau files compile; the existing 41 checks still pass. Added 290 layout assertions across 320×568, 360×640, 390×844, 600×960, 640×360, 844×390, 1024×768, 1280×720 and 1920×1080. Added 15 mocked HUD interaction checks for selling/travel, upgrades, affordability, focus preservation, menus, settings, reward code entry and multi-touch hold. WorldArt constructor/export completed for a 348-part sample art scene, and Blender produced an editable .blend, eight FBXs and an art render. None of these substitute for the unchecked Studio/device checks above.
+
+The eight FBX assets also re-imported successfully in Blender with materials and outward-facing closed-mesh volume checks. This does not verify Roblox mesh-import settings.
