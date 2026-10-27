@@ -1,0 +1,987 @@
+<?xml version='1.0' encoding='utf-8'?>
+<roblox version="4">
+  <External>null</External>
+  <External>nil</External>
+  <Item class="Workspace" referent="RBX1">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="StreamingEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="RBX2">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="RBX3">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="RBX4">
+        <Properties>
+          <string name="Name">Config</string>
+          <ProtectedString name="Source">--!strict
+-- Set IDs to your own published products. Zero IDs hide purchase buttons.
+local C: any = {}
+C.Audio = {Break=0, Sell=0, Rank=0, Music=0} -- upload assets/audio/*.wav and set IDs
+C.DataStore = "YardworkProfiles_v1"
+C.Prototype = true -- false enables all 26 ranks and prestige
+C.StudioMemory = true -- Studio-only, never used by published servers
+C.PlayerCap = 8 -- set the same cap in experience settings; profile on devices before raising
+C.RankCount = if C.Prototype then 3 else 26
+C.ResetSeconds = 300
+C.Grid = 6
+C.Depth = 3
+C.BlockSize = 4
+C.Reach = 22
+C.Ores = {
+ {Name="Chalk", Weight=70, Value=1, Health=1, Color=Color3.fromRGB(220,224,209)},
+ {Name="Copper", Weight=25, Value=3, Health=2, Color=Color3.fromRGB(223,139,82)},
+ {Name="Glowstone", Weight=5, Value=8, Health=3, Color=Color3.fromRGB(79,220,179)},
+}
+C.Picks = {
+ {Name="Yard Pick", Cost=0, Damage=1, Interval=0.45},
+ {Name="Trusty Pick", Cost=180, Damage=2, Interval=0.38},
+ {Name="Workshop Pick", Cost=800, Damage=3, Interval=0.30},
+ {Name="Foreman Pick", Cost=4500, Damage=5, Interval=0.24},
+}
+C.Bags = {30,60,120,240,480}
+C.BagCosts = {0,150,650,2500,10000}
+C.Passes = {Money=0, Tokens=0, Auto=0, Backpack=0, VIP=0}
+-- IDs must be unique, nonzero, and belong to this experience before enabling.
+C.Products = {
+ {Id=0, Name="Starter Pack", Kind="Starter", Amount=500, Robux=49},
+ {Id=0, Name="Pocket Money", Kind="Money", Amount=2000, Robux=29},
+ {Id=0, Name="Workshop Fund", Kind="Money", Amount=12000, Robux=99},
+ {Id=0, Name="2x Money: 15 min", Kind="Boost", Amount=900, Robux=29},
+ {Id=0, Name="2x Money: 30 min", Kind="Boost", Amount=1800, Robux=49},
+ {Id=0, Name="2x Money: 60 min", Kind="Boost", Amount=3600, Robux=79},
+ {Id=0, Name="Mine Reset Credit", Kind="Reset", Amount=1, Robux=19},
+}
+C.Codes = {WELCOME={Money=100, Tokens=0}} -- rotate/expire on server before campaigns
+C.Event = {Name="Workshop Weekend", Start=0, Finish=0, Bonus=1} -- UTC timestamps; inactive by default
+C.TokenPrices = {Fortune=5, Chain=8, Burst=12, Capacity=5, Skin=10, Pet=15}
+function C.rankCost(rank: number): number return if rank==1 then 900 else math.floor(1800 * 1.34 ^ (rank-2)) end
+function C.rankMultiplier(rank: number): number return 1 + (rank-1)*0.08 end
+function C.prestigeCost(prestiges: number): number return math.floor(120000*(1+prestiges*0.25)) end
+function C.oreValue(ore: number, tier: number): number return math.floor(C.Ores[ore].Value * 1.2^(tier-1)) end
+return C
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX5">
+        <Properties>
+          <string name="Name">Types</string>
+          <ProtectedString name="Source">--!strict
+export type Profile = {
+ Version: number, Money: number, Tokens: number, Rank: number, Prestiges: number,
+ Pick: number, Bag: number, Ore: {[string]: number}, Enchants: {[string]: number},
+ BoostUntil: number, ResetCredits: number, ResetPending: number, StarterOwned: boolean, Codes: {[string]: boolean},
+ Daily: number, Streak: number, Receipts: {[string]: boolean}, Milestones: {[string]: boolean},
+ TotalEarned: number, LastDay: number, FirstDay: number, Settings: {[string]: boolean},
+}
+return {}
+</ProtectedString>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="RBX6">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="RBX7">
+      <Properties>
+        <string name="Name">Bootstrap</string>
+        <ProtectedString name="Source">--!strict
+local Players=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local C=require(RS.Shared.Config)
+local services=script.Parent.Services
+local Data=require(services.DataService)
+local E=require(services.EconomyService)
+local A=require(services.AnalyticsService)
+local B=require(services.BackpackService)
+local R=require(services.RankService)
+local P=require(services.PrestigeService)
+local S=require(services.ShopService)
+local T=require(services.RetentionService)
+local Mine=require(services.MineService)
+local Money=require(services.MonetizationService)
+local Leaders=require(services.LeaderboardService)
+local remotes=Instance.new("Folder"); remotes.Name="YardworkRemotes"; remotes.Parent=RS
+local action=Instance.new("RemoteEvent"); action.Name="Action"; action.Parent=remotes
+local state=Instance.new("RemoteEvent"); state.Name="State"; state.Parent=remotes
+local notice=Instance.new("RemoteEvent"); notice.Name="Notice"; notice.Parent=remotes
+A.new(Data); B.new(Data,E,A); R.new(Data,A); P.new(Data,E,A); S.new(Data,A); T.new(Data,A); Mine.new(Data,B,A); Money.new(Data,E,A)
+Mine.build(); Data.start(); Leaders.start(Data)
+local buckets: {[Player]: any}={}
+local working: {[Player]: boolean}={}
+local function push(player: Player)
+ local p=Data.read(player); if not p then return end
+ local resets={}; for tier,m in pairs(Mine.Mines) do resets[tier]=math.max(0,m.Next-os.time()) end
+ -- Explicit projection; receipt IDs, redeemed codes, lock tokens remain server-only.
+ state:FireClient(player,{Money=p.Money,Tokens=p.Tokens,Rank=p.Rank,Prestiges=p.Prestiges,
+  Pick=p.Pick,Bag=p.Bag,Count=B.count(p),Capacity=B.capacity(player,p),Enchants=p.Enchants,
+  BoostUntil=p.BoostUntil,ResetCredits=p.ResetCredits,Streak=p.Streak,Daily=p.Daily,
+  MineTier=Mine.Current[player] or 1,Passes=E.Passes[player] or {},Settings=p.Settings,Resets=resets,Leaders=Leaders.Cache})
+ local stats=player:FindFirstChild("leaderstats")
+ if stats then
+  local money=stats:FindFirstChild("Money") :: NumberValue; money.Value=p.Money
+  local rank=stats:FindFirstChild("Rank") :: IntValue; rank.Value=p.Rank
+  local prestige=stats:FindFirstChild("Prestiges") :: IntValue; prestige.Value=p.Prestiges
+ end
+end
+local function joined(player: Player)
+ if not Data.load(player) then player:Kick("Profile busy or unavailable. Please try again shortly; no progress was overwritten."); return end
+ if not player.Parent then Data.save(player,true); return end
+ if Data.Closing then Data.save(player,true); player:Kick("Server closing. Please rejoin."); return end
+ Money.refresh(player); T.join(player)
+ local pending=Data.read(player)
+ if pending and pending.ResetPending&gt;0 and Mine.Mines[pending.ResetPending] then
+  Mine.Mines[pending.ResetPending].Next=math.min(Mine.Mines[pending.ResetPending].Next,os.time()+30)
+ end
+ local stats=Instance.new("Folder"); stats.Name="leaderstats"; stats.Parent=player
+ for _,name in {"Money","Rank","Prestiges"} do
+  local v=Instance.new(if name=="Money" then "NumberValue" else "IntValue"); v.Name=name; v.Parent=stats
+ end
+ local function characterReady(character: Model)
+  local root=character:WaitForChild("HumanoidRootPart",10)
+  if root then character:PivotTo(CFrame.new(Mine.safe(1))); Mine.Current[player]=1 end
+  local humanoid=character:FindFirstChildOfClass("Humanoid")
+  if humanoid and E.pass(player,"VIP") then humanoid.DisplayName="[VIP] "..player.DisplayName end
+  local tool=Instance.new("Tool"); tool.Name="Yard Pick"; tool.RequiresHandle=true; tool.CanBeDropped=false
+  local handle=Instance.new("Part"); handle.Name="Handle"; handle.Size=Vector3.new(0.3,3,0.3); handle.Color=Color3.fromRGB(143,91,58); handle.CanCollide=false; handle.Massless=true; handle.Parent=tool
+  local blade=Instance.new("Part"); blade.Name="Blade"; blade.Size=Vector3.new(2.6,0.5,0.5); blade.Color=Color3.fromRGB(117,206,210); blade.CanCollide=false; blade.Massless=true; blade.CFrame=handle.CFrame*CFrame.new(0,1.2,0); blade.Parent=tool
+  local weld=Instance.new("WeldConstraint"); weld.Part0=handle; weld.Part1=blade; weld.Parent=handle
+  local backpack=player:WaitForChild("Backpack",10); if backpack then tool.Parent=backpack end
+ end
+ player.CharacterAdded:Connect(characterReady)
+ if player.Character then task.spawn(characterReady,player.Character) end
+ push(player)
+end
+Players.PlayerAdded:Connect(joined)
+for _,player in Players:GetPlayers() do task.spawn(joined,player) end
+Players.PlayerRemoving:Connect(function(player: Player)
+ Data.save(player,true); E.Passes[player]=nil; buckets[player]=nil; working[player]=nil; Mine.Last[player]=nil; Mine.Visits[player]=nil; Mine.Current[player]=nil
+end)
+action.OnServerEvent:Connect(function(player: Player,verb: any,arg: any)
+ if type(verb)~="string" or #verb&gt;20 then return end
+ local now=os.clock(); local bucket=buckets[player] or {Tokens=16,At=now}
+ bucket.Tokens=math.min(16,bucket.Tokens+(now-bucket.At)*8); bucket.At=now; buckets[player]=bucket
+ if bucket.Tokens&lt;1 or working[player] then return end
+ bucket.Tokens-=1
+ if not Data.read(player) then return end
+ working[player]=true
+ local ok,err=pcall(function()
+  local success=false
+  if verb=="Sync" then push(player); return
+  elseif verb=="Mine" and typeof(arg)=="Instance" then success=Mine.hit(player,arg)
+  elseif verb=="Sell" and Mine.nearSell(player) then success=B.sell(player)
+  elseif verb=="Rank" then success=R.buy(player)
+  elseif verb=="Prestige" and arg=="CONFIRM_RESET" then success=P.buy(player); if success then Mine.teleport(player,1) end
+  elseif verb=="Shop" and type(arg)=="string" and #arg&lt;=20 then success=S.buy(player,arg)
+  elseif verb=="VIP" and E.pass(player,"VIP") and player.Character then
+   player.Character:PivotTo(CFrame.new(-50,5,25)); success=true
+  elseif verb=="Visit" and type(arg)=="number" and arg==arg and math.abs(arg)&lt;100 then success=Mine.teleport(player,arg)
+  elseif verb=="Daily" then success=T.daily(player)
+  elseif verb=="Code" and type(arg)=="string" and #arg&lt;=32 then success=T.code(player,string.upper(arg))
+  elseif verb=="Reset" then
+   local p=Data.read(player); local tier=Mine.Current[player] or 1
+   local m=Mine.Mines[tier]
+   if not m.Resetting and m.Next-os.time()&lt;C.ResetSeconds-60 then
+    -- Queue intent persists before the credit is consumed; world operation cannot grant currency.
+    success=Data.transaction(player,function(d: any)
+     if d.ResetCredits&lt;=0 then return false end
+     if d.ResetPending&gt;0 then return false end
+     d.ResetCredits-=1; d.ResetPending=tier; return true
+    end,true)
+    if success then m.Next=math.min(m.Next,os.time()+30); notice:FireAllClients("Extra mine reset in 30 seconds. Move to the rim!") end
+   end
+  elseif verb=="Setting" and type(arg)=="string" and (arg=="Music" or arg=="Effects" or arg=="Motion") then
+   success=Data.transaction(player,function(p: any) p.Settings[arg]=not p.Settings[arg]; return true end)
+  end
+  if verb~="Mine" then notice:FireClient(player,if success then "Done!" else "Unavailable: check cost, access, capacity, or stand near Sell.") end
+  push(player)
+ end)
+ working[player]=nil
+ if not ok then warn("Action failed:",tostring(err)); notice:FireClient(player,"Action could not complete. Try again.") end
+end)
+task.spawn(function()
+ while true do task.wait(2); for _,player in Players:GetPlayers() do push(player) end end
+end)
+game:BindToClose(function()
+ Data.Closing=true
+ local count=0
+ for player in pairs(Data.Sessions) do count+=1; task.spawn(function() Data.save(player,true); count-=1 end) end
+ local deadline=os.clock()+25; while count&gt;0 and os.clock()&lt;deadline do task.wait(0.1) end
+end)
+</ProtectedString>
+      </Properties>
+    </Item>
+    <Item class="Folder" referent="RBX8">
+      <Properties>
+        <string name="Name">Services</string>
+      </Properties>
+      <Item class="ModuleScript" referent="RBX9">
+        <Properties>
+          <string name="Name">AnalyticsService</string>
+          <ProtectedString name="Source">--!strict
+local Platform = game:GetService("AnalyticsService")
+local Run = game:GetService("RunService")
+local A: any = {}
+function A.new(data: any)
+ A.Data=data
+end
+function A.once(player: Player, name: string)
+ local fresh=false
+ A.Data.transaction(player,function(p: any)
+  if not p.Milestones[name] then p.Milestones[name]=true; fresh=true end
+  return true
+ end)
+ if fresh then
+  if Run:IsStudio() then print("Yardwork milestone:",name) else
+   pcall(function() Platform:LogCustomEvent(player,name,1) end)
+  end
+ end
+end
+return A
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX10">
+        <Properties>
+          <string name="Name">BackpackService</string>
+          <ProtectedString name="Source">--!strict
+local C=require(game.ReplicatedStorage.Shared.Config)
+local B: any = {}
+function B.new(data: any,economy: any,analytics: any) B.Data=data; B.E=economy; B.A=analytics end
+function B.count(p: any): number
+ local n=0; for _,v in pairs(p.Ore) do n+=v end; return n
+end
+function B.capacity(player: Player,p: any): number
+ return math.floor((C.Bags[p.Bag]+p.Enchants.Capacity*15)*(if B.E.pass(player,"Backpack") then 1.5 else 1))
+end
+function B.sell(player: Player): boolean
+ local p=B.Data.read(player); if not p then return false end
+ -- Friend calls may yield, so calculate before entering the non-yielding mutation.
+ local multiplier=B.E.multiplier(player,p)
+ local sold=B.Data.transaction(player,function(d: any)
+  local value=0
+  for key,n in pairs(d.Ore) do
+   local tier,ore=string.match(key,"^(%d+):(%d+)$")
+   if tier and ore then value+=C.oreValue(tonumber(ore),tonumber(tier))*n end
+  end
+  if value&lt;=0 then return false end
+  local reward=math.floor(value*multiplier)
+  d.Money+=reward; d.TotalEarned+=reward; d.Ore={}; return true
+ end)
+ if sold then B.A.once(player,"FirstSell") end
+ return sold
+end
+return B
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX11">
+        <Properties>
+          <string name="Name">DataService</string>
+          <ProtectedString name="Source">--!strict
+-- All profile mutations use transaction(). No mutable profiles escape this module.
+local DSS = game:GetService("DataStoreService")
+local Http = game:GetService("HttpService")
+local Run = game:GetService("RunService")
+local C = require(game.ReplicatedStorage.Shared.Config)
+local Data: any = {Sessions={}, Closing=false}
+local store = DSS:GetDataStore(C.DataStore)
+local memory: {[string]: any} = {}
+local function copy(x: any): any
+ if type(x) ~= "table" then return x end
+ local r = {}; for k,v in pairs(x) do r[k]=copy(v) end; return r
+end
+local function defaults(): any
+ return {Version=1, Money=0, Tokens=0, Rank=1, Prestiges=0, Pick=1, Bag=1, Ore={},
+ Enchants={Fortune=0,Chain=0,Burst=0,Capacity=0,Skin=0,Pet=0}, BoostUntil=0,
+ ResetCredits=0, ResetPending=0, StarterOwned=false, Codes={}, Daily=-1, Streak=0, Receipts={},
+ Milestones={}, TotalEarned=0, LastDay=-1, FirstDay=-1,
+ Settings={Music=true,Effects=true,Motion=true}}
+end
+local function update(key: string, fn: (any)-&gt;any): (boolean, any)
+ for attempt=1,4 do
+  local ok,res=pcall(function()
+   if Run:IsStudio() and C.StudioMemory then
+    local nextValue=fn(copy(memory[key])); if nextValue then memory[key]=copy(nextValue) end
+    return copy(memory[key])
+   end
+   return store:UpdateAsync(key,fn)
+  end)
+  if ok then return true,res end
+  warn("Profile store retry",attempt) -- no private data in output
+  task.wait(math.min(2^(attempt-1),8))
+ end
+ return false,nil
+end
+function Data.load(player: Player): boolean
+ if Data.Closing then return false end
+ local key="p_"..player.UserId
+ local token=Http:GenerateGUID(false)
+ local ok,record=update(key,function(old: any)
+  if old and old.Data and old.Data.Version &gt; 1 then return nil end
+  if old and old.Lock and old.Lock.Expires &gt; os.time() then return nil end
+  local d=if old and old.Data then old.Data else defaults()
+  -- v1 migration: fill newly introduced fields; unknown future versions are refused.
+  for k,v in pairs(defaults()) do if d[k]==nil then d[k]=v end end
+  return {Data=d,Lock={Token=token,Expires=os.time()+180}}
+ end)
+ if not ok or not record or not record.Lock or record.Lock.Token~=token then return false end
+ Data.Sessions[player]={Key=key,Token=token,Profile=record.Data,Busy=false,Lost=false,Lease=record.Lock.Expires}
+ return true
+end
+local function acquire(s: any): boolean
+ while s.Busy do task.wait() end
+ if s.Lost then return false end
+ s.Busy=true; return true
+end
+local function persist(s: any, p: any, release: boolean): boolean
+ local revision=Http:GenerateGUID(false)
+ local ok,record=update(s.Key,function(old: any)
+  if not old or not old.Lock or old.Lock.Token~=s.Token or old.Lock.Expires&lt;=os.time() then return nil end
+  return {Data=p,Revision=revision,Lock=if release then nil else {Token=s.Token,Expires=os.time()+180}}
+ end)
+ local valid=ok and record and record.Revision==revision and (if release then record.Lock==nil else record.Lock and record.Lock.Token==s.Token)
+ if valid and not release then s.Lease=record.Lock.Expires end
+ if not valid then s.Lost=true end
+ return valid==true
+end
+function Data.read(player: Player): any
+ local s=Data.Sessions[player]
+ if not s or s.Lost or os.time() &gt;= s.Lease-10 then return nil end
+ return copy(s.Profile)
+end
+function Data.transaction(player: Player, fn: (any)-&gt;boolean, durable: boolean?): boolean
+ local s=Data.Sessions[player]
+ if not s or s.Busy or not acquire(s) then return false end
+ if os.time()&gt;=s.Lease-10 then s.Busy=false; return false end
+ local candidate=copy(s.Profile)
+ local ok,accept=pcall(fn,candidate)
+ if not ok then warn("Profile transaction failed") end
+ local success=ok and accept==true
+ if success and durable then success=persist(s,candidate,false) end
+ if success then s.Profile=candidate end
+ s.Busy=false
+ return success
+end
+function Data.save(player: Player, release: boolean?): boolean
+ local s=Data.Sessions[player]; if not s or not acquire(s) then return false end
+ local ok=persist(s,s.Profile,release==true)
+ s.Busy=false
+ if release or not ok then Data.Sessions[player]=nil end
+ return ok
+end
+function Data.start()
+ task.spawn(function()
+  while not Data.Closing do
+   task.wait(45)
+   for player in pairs(Data.Sessions) do
+    if not Data.save(player,false) then player:Kick("Saving unavailable. Please rejoin to protect your progress.") end
+   end
+  end
+ end)
+end
+return Data
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX12">
+        <Properties>
+          <string name="Name">EconomyService</string>
+          <ProtectedString name="Source">--!strict
+local Players=game:GetService("Players")
+local C=require(game.ReplicatedStorage.Shared.Config)
+local E: any = {Passes={}}
+function E.pass(player: Player, name: string): boolean
+ return E.Passes[player] and E.Passes[player][name]==true or false
+end
+function E.multiplier(player: Player, p: any): number
+ local friends=0
+ for _,other in Players:GetPlayers() do
+  if other~=player then
+   local ok,isFriend=pcall(function() return player:IsFriendsWith(other.UserId) end)
+   if ok and isFriend then friends+=1 end
+  end
+ end
+ local event=if os.time()&gt;=C.Event.Start and os.time()&lt;C.Event.Finish then C.Event.Bonus else 0
+ local social=math.min(2.15,1+math.min(friends,3)*0.05+event)
+ return C.rankMultiplier(p.Rank)*math.min(5,1+p.Prestiges*0.2)
+  *(if E.pass(player,"Money") then 2 else 1)*(if p.BoostUntil&gt;os.time() then 2 else 1)*social
+end
+return E
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX13">
+        <Properties>
+          <string name="Name">LeaderboardService</string>
+          <ProtectedString name="Source">--!strict
+local DSS=game:GetService("DataStoreService")
+local Run=game:GetService("RunService")
+local C=require(game.ReplicatedStorage.Shared.Config)
+local L: any = {Cache={}}
+function L.start(data: any)
+ if Run:IsStudio() or C.Prototype then return end
+ task.spawn(function()
+  while true do
+   task.wait(120)
+   for _,metric in {"Money","Rank","Prestiges"} do
+    local store=DSS:GetOrderedDataStore("Yardwork_"..metric.."_v1")
+    for player in pairs(data.Sessions) do
+     local p=data.read(player)
+     if p then pcall(function() store:SetAsync(tostring(player.UserId),math.floor(p[metric])) end); task.wait(0.3) end
+    end
+    local ok,pages=pcall(function() return store:GetSortedAsync(false,10) end)
+    if ok then L.Cache[metric]=pages:GetCurrentPage() end
+   end
+  end
+ end)
+end
+return L
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX14">
+        <Properties>
+          <string name="Name">MineService</string>
+          <ProtectedString name="Source">--!strict
+local Tags=game:GetService("CollectionService")
+local Players=game:GetService("Players")
+local C=require(game.ReplicatedStorage.Shared.Config)
+local M: any = {Mines={},Blocks={},Last={},Visits={},Current={},Random=Random.new()}
+local function part(name: string,size: Vector3,position: Vector3,color: Color3,parent: Instance): Part
+ local p=Instance.new("Part"); p.Name=name; p.Size=size; p.Position=position
+ p.Color=color; p.Anchored=true; p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth; p.Parent=parent; return p
+end
+local function label(p: BasePart,text: string)
+ local gui=Instance.new("BillboardGui"); gui.Size=UDim2.fromOffset(260,65); gui.StudsOffset=Vector3.new(0,5,0); gui.AlwaysOnTop=true; gui.MaxDistance=100; gui.Parent=p
+ local t=Instance.new("TextLabel"); t.Size=UDim2.fromScale(1,1); t.BackgroundTransparency=1; t.Text=text; t.TextColor3=Color3.new(1,1,1); t.TextStrokeTransparency=0.3; t.TextScaled=true; t.Font=Enum.Font.GothamBold; t.Parent=gui
+end
+function M.new(data: any,bag: any,analytics: any) M.Data=data; M.Bag=bag; M.A=analytics end
+function M.safe(tier: number): Vector3 return Vector3.new((tier-1)*90,5,24) end
+function M.teleport(player: Player,tier: number): boolean
+ local p=M.Data.read(player)
+ if not p or tier%1~=0 or tier&lt;1 or tier&gt;p.Rank or not M.Mines[tier] then return false end
+ local character=player.Character; if not character then return false end
+ character:PivotTo(CFrame.new(M.safe(tier)))
+ M.Visits[player]=os.clock(); M.Current[player]=tier; return true
+end
+function M.nearSell(player: Player): boolean
+ local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+ if not root or not root:IsA("BasePart") then return false end
+ local p=M.Data.read(player); if not p then return false end
+ for tier,mine in pairs(M.Mines) do
+  if tier&lt;=p.Rank and (root.Position-mine.Sell.Position).Magnitude&lt;=16 then return true end
+ end
+ return false
+end
+function M.reset(tier: number)
+ local mine=M.Mines[tier]; if mine.Resetting then return end
+ mine.Resetting=true; mine.Generation+=1
+ for _,player in Players:GetPlayers() do
+  local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+  if root and root:IsA("BasePart") and math.abs(root.Position.X-mine.X)&lt;38 and math.abs(root.Position.Z)&lt;18 then
+   if player.Character then player.Character:PivotTo(CFrame.new(M.safe(tier))) end
+  end
+ end
+ for _,block in mine.Folder:GetChildren() do M.Blocks[block]=nil; block:Destroy() end
+ for y=0,C.Depth-1 do
+  for x=0,C.Grid-1 do
+   for z=0,C.Grid-1 do
+    local roll=M.Random:NextInteger(1,100); local index=1
+    for i,ore in C.Ores do roll-=ore.Weight; if roll&lt;=0 then index=i; break end end
+    local ore=C.Ores[index]
+    local b=part(ore.Name,Vector3.one*C.BlockSize,Vector3.new(mine.X+(x-2.5)*4,-2-y*4,(z-2.5)*4),ore.Color,mine.Folder)
+    b:SetAttribute("Health",ore.Health); b:SetAttribute("MaxHealth",ore.Health); b:SetAttribute("Tier",tier)
+    Tags:AddTag(b,"MineBlock")
+    M.Blocks[b]={Tier=tier,Ore=index,Health=ore.Health,Generation=mine.Generation}
+   end
+  end
+  task.wait() -- bounded reset batches
+ end
+ mine.Next=os.time()+C.ResetSeconds; mine.Resetting=false
+ -- Pending reset intents survive crashes; clear only after a completed rebuild.
+ for player in pairs(M.Data.Sessions) do
+  local d=M.Data.read(player)
+  if d and d.ResetPending==tier then
+   M.Data.transaction(player,function(p: any) p.ResetPending=0; return true end,true)
+  end
+ end
+end
+function M.build()
+ local world=Instance.new("Folder"); world.Name="YardworkWorld"; world.Parent=workspace
+ local lighting=game:GetService("Lighting"); lighting.ClockTime=14; lighting.Brightness=2
+ lighting.Ambient=Color3.fromRGB(130,144,170)
+ local atmosphere=Instance.new("Atmosphere"); atmosphere.Density=0.2; atmosphere.Parent=lighting
+ local bloom=Instance.new("BloomEffect"); bloom.Intensity=0.15; bloom.Threshold=1.5; bloom.Parent=lighting
+ local count=if C.Prototype then 1 else 26
+ for tier=1,count do
+  local x=(tier-1)*90
+  part("Courtyard",Vector3.new(76,2,68),Vector3.new(x,-14,5),Color3.fromRGB(91,111,121),world)
+  -- Safe rim at y=0 with a central opening into the mine.
+  part("Front",Vector3.new(60,2,16),Vector3.new(x,-1,21),Color3.fromRGB(216,192,146),world)
+  part("Back",Vector3.new(60,2,12),Vector3.new(x,-1,-19),Color3.fromRGB(216,192,146),world)
+  for _,dx in {-22,22} do part("Side",Vector3.new(16,2,24),Vector3.new(x+dx,-1,0),Color3.fromRGB(216,192,146),world) end
+  local sell=part("SellZone",Vector3.new(10,0.3,8),Vector3.new(x-18,0.2,22),Color3.fromRGB(75,214,163),world); label(sell,"SELL • tap Sell All")
+  Tags:AddTag(sell,"SellZone")
+  local sign=part("MineSign",Vector3.new(3,5,1),Vector3.new(x,3,-21),Color3.fromRGB(36,91,108),world)
+  label(sign,"Mine "..string.char(64+tier))
+  local region=part("MineRegion",Vector3.new(24,12,24),Vector3.new(x,-6,0),Color3.new(),world)
+  region.Transparency=1; region.CanCollide=false; region.CanQuery=false; region:SetAttribute("Tier",tier); Tags:AddTag(region,"MineRegion")
+  local folder=Instance.new("Folder"); folder.Name="Blocks"..tier; folder.Parent=world
+  M.Mines[tier]={X=x,Folder=folder,Sell=sell,Next=0,Resetting=false,Generation=0}
+  if tier==1 then
+   local spawn=Instance.new("SpawnLocation"); spawn.Size=Vector3.new(7,1,7); spawn.Position=Vector3.new(x,0.5,25); spawn.Anchored=true; spawn.Neutral=true; spawn.Parent=world
+   local lounge=part("VIPLounge",Vector3.new(20,2,20),Vector3.new(-50,-1,25),Color3.fromRGB(139,111,62),world); label(lounge,"VIP • cosmetic lounge")
+   local counter=part("Workshop",Vector3.new(8,5,4),Vector3.new(x+20,2.5,25),Color3.fromRGB(43,137,151),world); label(counter,"WORKSHOP • use Shop")
+   local guard=part("Warden",Vector3.new(3,4,2),Vector3.new(x+10,2,27),Color3.fromRGB(61,85,118),world)
+   part("Head",Vector3.new(2,2,2),Vector3.new(x+10,5,27),Color3.fromRGB(246,205,156),world); label(guard,"Welcome! Mine, sell, grow.")
+  end
+  M.reset(tier)
+ end
+ task.spawn(function()
+  while true do
+   task.wait(1)
+   for tier,mine in pairs(M.Mines) do
+    if os.time()&gt;=mine.Next and not mine.Resetting then task.spawn(M.reset,tier) end
+   end
+  end
+ end)
+end
+function M.hit(player: Player,block: Instance): boolean
+ local info=M.Blocks[block]; if not info or not block:IsA("BasePart") then return false end
+ local mine=M.Mines[info.Tier]; if mine.Resetting or info.Generation~=mine.Generation then return false end
+ local p=M.Data.read(player); if not p or info.Tier&gt;p.Rank then return false end
+ local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+ local head=player.Character and player.Character:FindFirstChild("Head")
+ local human=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+ if not root or not root:IsA("BasePart") or not head or not head:IsA("BasePart") or not human or human.Health&lt;=0 then return false end
+ if (root.Position-block.Position).Magnitude&gt;C.Reach then return false end
+ local pick=C.Picks[p.Pick]
+ if os.clock()-(M.Last[player] or 0)&lt;pick.Interval then return false end
+ local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances={player.Character :: Instance}
+ local ray=workspace:Raycast(head.Position,(block.Position-head.Position),params)
+ if ray and ray.Instance~=block then return false end
+ if M.Bag.count(p)&gt;=M.Bag.capacity(player,p) then return false end
+ M.Last[player]=os.clock()
+ info.Health-=pick.Damage; block:SetAttribute("Health",math.max(0,info.Health))
+ if info.Health&gt;0 then return true end
+ -- No yields between reward transaction and removing blocks: a break can resolve only once.
+ local targets={block}
+ local limit=1+p.Enchants.Chain+(if p.Enchants.Burst&gt;0 then 1+p.Enchants.Burst else 0)
+ if limit&gt;1 then
+  for candidate,entry in pairs(M.Blocks) do
+   if #targets&gt;=math.min(12,limit) then break end
+   if candidate~=block and entry.Tier==info.Tier and (candidate.Position-block.Position).Magnitude&lt;=7 then table.insert(targets,candidate) end
+  end
+ end
+ local removed: {Instance}={}
+ local accepted=M.Data.transaction(player,function(d: any)
+  local room=M.Bag.capacity(player,d)-M.Bag.count(d)
+  for _,target in targets do
+   local entry=M.Blocks[target]
+   if room&lt;=0 then break end
+   if entry then
+    local amount=math.min(room,1+(if M.Random:NextNumber()&lt;d.Enchants.Fortune*0.08 then 1 else 0))
+    local key=entry.Tier..":"..entry.Ore
+    d.Ore[key]=(d.Ore[key] or 0)+amount; room-=amount; table.insert(removed,target)
+   end
+  end
+  return #removed&gt;0
+ end)
+ if accepted then
+  for _,target in removed do M.Blocks[target]=nil; target:Destroy() end
+  M.A.once(player,"FirstMine")
+ else info.Health=1; block:SetAttribute("Health",1) end
+ return accepted
+end
+return M
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX15">
+        <Properties>
+          <string name="Name">MonetizationService</string>
+          <ProtectedString name="Source">--!strict
+local Market=game:GetService("MarketplaceService")
+local Players=game:GetService("Players")
+local C=require(game.ReplicatedStorage.Shared.Config)
+local M: any = {Products={}}
+function M.new(data: any,economy: any,analytics: any)
+ M.Data=data; M.E=economy; M.A=analytics
+ for _,product in C.Products do
+  if product.Id&gt;0 then assert(not M.Products[product.Id],"Duplicate product ID"); M.Products[product.Id]=product end
+ end
+ Market.ProcessReceipt=function(receipt: any)
+  local player=Players:GetPlayerByUserId(receipt.PlayerId)
+  local product=M.Products[receipt.ProductId]
+  if not player or not product then return Enum.ProductPurchaseDecision.NotProcessedYet end
+  local id=tostring(receipt.PurchaseId)
+  local ok=data.transaction(player,function(p: any)
+   if p.Receipts[id] then return true end
+   -- Never prune IDs without an archival design: delayed replays must remain idempotent.
+   if product.Kind=="Money" then p.Money+=product.Amount
+   elseif product.Kind=="Starter" then
+    -- Repeat purchases still fulfil the advertised money grant; skin already owned is harmless.
+    p.Money+=product.Amount; p.StarterOwned=true; p.Enchants.Skin=1
+   elseif product.Kind=="Boost" then p.BoostUntil=math.max(os.time(),p.BoostUntil)+product.Amount
+   elseif product.Kind=="Reset" then p.ResetCredits+=product.Amount
+   else return false end
+   p.Receipts[id]=true; return true
+  end,true)
+  if not ok then return Enum.ProductPurchaseDecision.NotProcessedYet end
+  analytics.once(player,"FirstPurchase")
+  return Enum.ProductPurchaseDecision.PurchaseGranted
+ end
+ Market.PromptGamePassPurchaseFinished:Connect(function(player: Player,_id: number,bought: boolean)
+  if bought then M.refresh(player) end
+ end)
+end
+function M.refresh(player: Player)
+ local owned={}
+ for name,id in pairs(C.Passes) do
+  if id&gt;0 then
+   local ok,res=pcall(function() return Market:UserOwnsGamePassAsync(player.UserId,id) end)
+   if ok and res then owned[name]=true end
+  end
+ end
+ M.E.Passes[player]=owned
+end
+return M
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX16">
+        <Properties>
+          <string name="Name">PrestigeService</string>
+          <ProtectedString name="Source">--!strict
+local C=require(game.ReplicatedStorage.Shared.Config)
+local P: any = {}
+function P.new(data: any,economy: any,analytics: any) P.Data=data; P.E=economy; P.A=analytics end
+function P.buy(player: Player): boolean
+ if C.Prototype then return false end
+ local ok=P.Data.transaction(player,function(p: any)
+  if p.Rank&lt;26 or p.Money&lt;C.prestigeCost(p.Prestiges) then return false end
+  p.Prestiges+=1; p.Tokens+=10*(if P.E.pass(player,"Tokens") then 2 else 1)
+  p.Money=0; p.Rank=1; p.Pick=1; p.Bag=1; p.Ore={}; return true
+ end,true)
+ if ok then P.A.once(player,"FirstPrestige") end; return ok
+end
+return P
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX17">
+        <Properties>
+          <string name="Name">RankService</string>
+          <ProtectedString name="Source">--!strict
+local C=require(game.ReplicatedStorage.Shared.Config)
+local R: any = {}
+function R.new(data: any,analytics: any) R.Data=data; R.A=analytics end
+function R.buy(player: Player): boolean
+ local ok=R.Data.transaction(player,function(p: any)
+  if p.Rank&gt;=C.RankCount then return false end
+  local cost=C.rankCost(p.Rank); if p.Money&lt;cost then return false end
+  p.Money-=cost; p.Rank+=1; return true
+ end,true)
+ if ok then R.A.once(player,"FirstRankUp") end; return ok
+end
+return R
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX18">
+        <Properties>
+          <string name="Name">RetentionService</string>
+          <ProtectedString name="Source">--!strict
+local C=require(game.ReplicatedStorage.Shared.Config)
+local R: any = {}
+function R.new(data: any,analytics: any) R.Data=data; R.A=analytics end
+function R.join(player: Player)
+ local day=math.floor(os.time()/86400); local dayOne=false
+ R.Data.transaction(player,function(p: any)
+  if p.FirstDay&lt;0 then p.FirstDay=day end
+  dayOne=day==p.FirstDay+1
+  p.LastDay=day; return true
+ end)
+ if dayOne then R.A.once(player,"Day1Return") end
+end
+function R.daily(player: Player): boolean
+ if C.Prototype then return false end
+ return R.Data.transaction(player,function(p: any)
+  local day=math.floor(os.time()/86400)
+  if p.Daily&gt;=day then return false end
+  p.Streak=if p.Daily==day-1 then math.min(7,p.Streak+1) else 1
+  p.Daily=day; p.Money+=100*p.Streak; return true
+ end,true)
+end
+function R.code(player: Player,code: string): boolean
+ if C.Prototype then return false end
+ local reward=C.Codes[code]; if not reward then return false end
+ return R.Data.transaction(player,function(p: any)
+  if p.Codes[code] then return false end
+  p.Codes[code]=true; p.Money+=reward.Money; p.Tokens+=reward.Tokens; return true
+ end,true)
+end
+return R
+</ProtectedString>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="RBX19">
+        <Properties>
+          <string name="Name">ShopService</string>
+          <ProtectedString name="Source">--!strict
+local C=require(game.ReplicatedStorage.Shared.Config)
+local S: any = {}
+function S.new(data: any,analytics: any) S.Data=data; S.A=analytics end
+function S.buy(player: Player,item: string): boolean
+ local ok=S.Data.transaction(player,function(p: any)
+  if item=="Pick" then
+   local nextTier=p.Pick+1; local pick=C.Picks[nextTier]
+   if not pick or (C.Prototype and nextTier&gt;3) or p.Money&lt;pick.Cost then return false end
+   p.Money-=pick.Cost; p.Pick=nextTier
+  elseif item=="Bag" then
+   local tier=p.Bag+1; local cost=C.BagCosts[tier]
+   if not cost or (C.Prototype and tier&gt;3) or p.Money&lt;cost then return false end
+   p.Money-=cost; p.Bag=tier
+  elseif C.TokenPrices[item] and not C.Prototype then
+   local level=p.Enchants[item]; local cap=if item=="Skin" or item=="Pet" then 1 else 5
+   local cost=C.TokenPrices[item]*(level+1)
+   if level&gt;=cap or p.Tokens&lt;cost then return false end
+   p.Tokens-=cost; p.Enchants[item]+=1
+  else return false end
+  return true
+ end,true)
+ if ok then S.A.once(player,"FirstUpgrade") end; return ok
+end
+return S
+</ProtectedString>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="RBX20">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="RBX21">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="RBX22">
+        <Properties>
+          <string name="Name">Game</string>
+          <ProtectedString name="Source">--!strict
+local Players=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local Input=game:GetService("UserInputService")
+local Tween=game:GetService("TweenService")
+local Market=game:GetService("MarketplaceService")
+local Debris=game:GetService("Debris")
+local player=Players.LocalPlayer
+local C=require(RS:WaitForChild("Shared"):WaitForChild("Config"))
+local remotes=RS:WaitForChild("YardworkRemotes")
+local action=remotes:WaitForChild("Action") :: RemoteEvent
+local state=remotes:WaitForChild("State") :: RemoteEvent
+local notice=remotes:WaitForChild("Notice") :: RemoteEvent
+local current: any=nil
+local held=false
+local auto=false
+local confirmed=false
+local page="Shop"
+local lastTarget: BasePart?=nil
+local gui=Instance.new("ScreenGui"); gui.Name="YardworkUI"; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=false; gui.Parent=player:WaitForChild("PlayerGui")
+local function text(parent: Instance,content: string,size: UDim2): TextLabel
+ local t=Instance.new("TextLabel"); t.Size=size; t.BackgroundTransparency=1; t.Text=content; t.TextColor3=Color3.fromRGB(245,247,240); t.Font=Enum.Font.GothamBold; t.TextSize=16; t.TextWrapped=true; t.Parent=parent; return t
+end
+local function button(parent: Instance,content: string,callback: ()-&gt;()): TextButton
+ local b=Instance.new("TextButton"); b.Size=UDim2.new(1,-8,0,46); b.BackgroundColor3=Color3.fromRGB(34,119,132); b.TextColor3=Color3.new(1,1,1); b.Font=Enum.Font.GothamBold; b.TextSize=15; b.TextWrapped=true; b.Text=content; b.Parent=parent
+ local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,10); corner.Parent=b
+ b.Activated:Connect(callback); return b
+end
+local hud=Instance.new("Frame"); hud.Size=UDim2.new(0.96,0,0,116); hud.Position=UDim2.fromScale(0.02,0); hud.BackgroundColor3=Color3.fromRGB(27,42,62); hud.Parent=gui
+local summary=text(hud,"Loading profile…",UDim2.new(1,-10,0,58)); summary.Position=UDim2.fromOffset(5,0)
+local hint=text(hud,"Mine a block → visit the green sell pad → upgrade.",UDim2.new(1,-10,0,32)); hint.Position=UDim2.fromOffset(5,58); hint.TextSize=13
+local bar=Instance.new("Frame"); bar.Position=UDim2.new(0.02,0,1,-17); bar.Size=UDim2.new(0.96,0,0,10); bar.BackgroundColor3=Color3.fromRGB(60,65,78); bar.Parent=hud
+local fill=Instance.new("Frame"); fill.Size=UDim2.fromScale(0,1); fill.BackgroundColor3=Color3.fromRGB(80,223,164); fill.Parent=bar
+local toast=text(gui,"",UDim2.new(0.85,0,0,58)); toast.Position=UDim2.fromScale(0.075,0.3); toast.TextStrokeTransparency=0.4
+local toastId=0
+local function sound(name: string)
+ if not current or not current.Settings.Effects or C.Audio[name]==0 then return end
+ local s=Instance.new("Sound"); s.SoundId="rbxassetid://"..C.Audio[name]; s.Volume=0.35; s.Parent=gui; s:Play(); Debris:AddItem(s,5)
+end
+local function notify(message: string)
+ toastId+=1; local id=toastId; toast.Text=message
+ if current and current.Settings.Motion then toast.TextTransparency=1; Tween:Create(toast,TweenInfo.new(0.15),{TextTransparency=0}):Play() else toast.TextTransparency=0 end
+ task.delay(3,function() if id==toastId then toast.Text="" end end)
+end
+local controls=Instance.new("Frame"); controls.Size=UDim2.new(0.35,0,0,156); controls.AnchorPoint=Vector2.new(1,1); controls.Position=UDim2.new(0.98,0,1,-175); controls.BackgroundTransparency=1; controls.Parent=gui
+local cl=Instance.new("UIListLayout"); cl.Padding=UDim.new(0,5); cl.Parent=controls
+local mineButton=button(controls,"Hold to mine",function() end)
+button(controls,"Sell All (near pad)",function() action:FireServer("Sell") end)
+local panel=Instance.new("Frame"); panel.Size=UDim2.fromScale(0.9,0.62); panel.Position=UDim2.fromScale(0.05,0.2); panel.BackgroundColor3=Color3.fromRGB(27,42,62); panel.Visible=false; panel.Parent=gui
+local title=text(panel,"WORKSHOP",UDim2.new(1,-65,0,42))
+local close=button(panel,"X",function() panel.Visible=false end); close.Size=UDim2.fromOffset(48,42); close.Position=UDim2.new(1,-52,0,0)
+local scroll=Instance.new("ScrollingFrame"); scroll.Position=UDim2.fromOffset(6,48); scroll.Size=UDim2.new(1,-12,1,-54); scroll.BackgroundTransparency=1; scroll.ScrollBarThickness=6; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.CanvasSize=UDim2.new(); scroll.Parent=panel
+local layout=Instance.new("UIListLayout"); layout.Padding=UDim.new(0,6); layout.Parent=scroll
+local function clear() for _,child in scroll:GetChildren() do if child~=layout then child:Destroy() end end end
+local function line(s: string) text(scroll,s,UDim2.new(1,-10,0,52)) end
+local function render()
+ if not current then return end
+ clear(); title.Text=string.upper(page)
+ local p=current
+ if page=="Shop" then
+  local pick=C.Picks[p.Pick+1]; local bag=C.BagCosts[p.Bag+1]
+  if pick and (not C.Prototype or p.Pick&lt;3) then button(scroll,"Pick: "..pick.Name.." • $"..pick.Cost,function() action:FireServer("Shop","Pick") end) end
+  if bag and (not C.Prototype or p.Bag&lt;3) then button(scroll,"Backpack: "..C.Bags[p.Bag+1].." • $"..bag,function() action:FireServer("Shop","Bag") end) end
+  if not C.Prototype then
+   for _,name in {"Fortune","Chain","Burst","Capacity","Skin","Pet"} do
+    local cost=C.TokenPrices[name]*(p.Enchants[name]+1)
+    button(scroll,name.." Lv "..p.Enchants[name].." • "..cost.." tokens",function() action:FireServer("Shop",name) end)
+   end
+  end
+  if p.Rank&lt;C.RankCount then
+   button(scroll,"Rank up to "..string.char(65+p.Rank).." • $"..C.rankCost(p.Rank),function() action:FireServer("Rank") end)
+  else line(if C.Prototype then "Prototype complete! Reach C and help test the loop." else "Rank Z reached! Prestige is available below.") end
+  button(scroll,"Prestige details",function() page="Prestige"; confirmed=false; render() end)
+  if p.Passes.VIP then button(scroll,"Visit VIP lounge",function() action:FireServer("VIP") end) end
+  button(scroll,"Choose mine",function() page="Mines"; render() end)
+  button(scroll,"Rewards &amp; codes",function() page="Rewards"; render() end)
+  button(scroll,"Passes &amp; products",function() page="Store"; render() end)
+  button(scroll,"Leaderboards",function() page="Leaders"; render() end)
+  button(scroll,"Settings",function() page="Settings"; render() end)
+ elseif page=="Mines" then
+  button(scroll,"Return to safety",function() action:FireServer("Visit",1) end)
+  for tier=1,(if C.Prototype then 1 else p.Rank) do
+   button(scroll,"Visit Mine "..string.char(64+tier),function() action:FireServer("Visit",tier) end)
+  end
+ elseif page=="Prestige" then
+  line("Requires Z and $"..C.prestigeCost(p.Prestiges)..". Grants 10 tokens (20 with pass) and +20% sell bonus, capped at 5x.")
+  line("RESETS money, rank, cash pickaxe, cash backpack, and unsold ore. Keeps tokens, enchants, cosmetics, passes and statistics.")
+  button(scroll,if confirmed then "CONFIRM: erase listed progress" else "I understand the resets",function()
+   if confirmed then action:FireServer("Prestige","CONFIRM_RESET"); confirmed=false else confirmed=true end; render()
+  end)
+ elseif page=="Rewards" then
+  line("Daily streak: "..p.Streak.." • claim once per UTC day. Prototype rewards are disabled.")
+  button(scroll,"Claim daily reward",function() action:FireServer("Daily") end)
+  local box=Instance.new("TextBox"); box.Size=UDim2.new(1,-8,0,48); box.PlaceholderText="Enter code"; box.Text=""; box.TextSize=18; box.Parent=scroll
+  button(scroll,"Redeem code",function() action:FireServer("Code",box.Text) end)
+  button(scroll,"Use reset credit (30s warning) • owned "..p.ResetCredits,function() action:FireServer("Reset") end)
+ elseif page=="Store" then
+  line("Optional purchases. All progression is free. Boost time expires even while offline. Check Roblox's prompt for the actual price.")
+  for name,id in pairs(C.Passes) do
+   if id&gt;0 then button(scroll,name..(if p.Passes[name] then " • Owned" else " • view price"),function() if not p.Passes[name] then Market:PromptGamePassPurchase(player,id) end end) end
+  end
+  for _,product in C.Products do
+   if product.Id&gt;0 then button(scroll,product.Name.." • view price",function() Market:PromptProductPurchase(player,product.Id) end) end
+  end
+  line("No options? Purchase IDs have not been configured. No payment is needed to play.")
+ elseif page=="Settings" then
+  for _,key in {"Music","Effects","Motion"} do
+   button(scroll,key..": "..tostring(p.Settings[key]),function() action:FireServer("Setting",key) end)
+  end
+  button(scroll,"Auto-target: "..tostring(auto).." (Auto pass)",function() if p.Passes.Auto then auto=not auto; render() else notify("Free hold-to-mine is always available.") end end)
+ elseif page=="Leaders" then
+  for _,metric in {"Money","Rank","Prestiges"} do
+   line(metric.." — refreshes about every 2 minutes")
+   for i,entry in (p.Leaders[metric] or {}) do line(i..". User "..entry.key.." • "..entry.value) end
+  end
+ end
+ if page~="Shop" then button(scroll,"Back",function() page="Shop"; render() end) end
+end
+button(controls,"Workshop / ranks",function() panel.Visible=not panel.Visible; page="Shop"; render() end)
+local function target(): BasePart?
+ local camera=workspace.CurrentCamera; if not camera then return nil end
+ local ray: Ray
+ if Input.TouchEnabled or Input.GamepadEnabled then ray=camera:ViewportPointToRay(camera.ViewportSize.X/2,camera.ViewportSize.Y/2)
+ else local pos=Input:GetMouseLocation(); ray=camera:ScreenPointToRay(pos.X,pos.Y) end
+ local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude
+ params.FilterDescendantsInstances=if player.Character then {player.Character} else {}
+ local result=workspace:Raycast(ray.Origin,ray.Direction*80,params)
+ if result and result.Instance:GetAttribute("Health") then return result.Instance end
+ return nil
+end
+local cross=text(gui,"+",UDim2.fromOffset(24,24)); cross.AnchorPoint=Vector2.new(0.5,0.5); cross.Position=UDim2.fromScale(0.5,0.5)
+local health=text(gui,"",UDim2.fromOffset(180,30)); health.AnchorPoint=Vector2.new(0.5,0); health.Position=UDim2.fromScale(0.5,0.54)
+local function holding(input: InputObject): boolean return input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 end
+mineButton.InputBegan:Connect(function(i) if holding(i) then held=true end end)
+Input.InputBegan:Connect(function(i,processed)
+ if processed then return end
+ if i.UserInputType==Enum.UserInputType.MouseButton1 or i.KeyCode==Enum.KeyCode.ButtonR2 then held=true end
+ if i.KeyCode==Enum.KeyCode.ButtonY then panel.Visible=not panel.Visible; render() end
+ if i.KeyCode==Enum.KeyCode.ButtonX then action:FireServer("Sell") end
+end)
+Input.InputEnded:Connect(function(i)
+ if holding(i) or i.KeyCode==Enum.KeyCode.ButtonR2 then held=false end
+end)
+Input.WindowFocusReleased:Connect(function() held=false end)
+notice.OnClientEvent:Connect(notify)
+state.OnClientEvent:Connect(function(p: any)
+ local old=current; current=p
+ if old and p.Count&gt;old.Count then
+  sound("Break")
+  if p.Settings.Effects and lastTarget then
+   local marker=Instance.new("Part"); marker.Anchored=true; marker.CanCollide=false; marker.CanQuery=false; marker.Shape=Enum.PartType.Ball; marker.Size=Vector3.one; marker.Color=Color3.fromRGB(90,240,180); marker.Position=lastTarget.Position; marker.Parent=workspace
+   Tween:Create(marker,TweenInfo.new(0.3),{Size=Vector3.one*3,Transparency=1}):Play(); Debris:AddItem(marker,0.4)
+  end
+ end
+ local reset=p.Resets[p.MineTier]
+ summary.Text=string.format("$%d • %d tokens • Rank %s • Prestige %d\nBag %d/%d • reset %ds",p.Money,p.Tokens,string.char(64+p.Rank),p.Prestiges,p.Count,p.Capacity,reset or 0)
+ fill.Size=UDim2.fromScale(math.clamp(p.Count/p.Capacity,0,1),1)
+ hint.Text=if p.Count==0 then "Mine blocks → sell at the green pad → buy upgrades." elseif p.Count&gt;=p.Capacity then "Backpack full! Use Return to safety, then visit Sell." else "Next rank: "..(if p.Rank&lt;C.RankCount then "$"..C.rankCost(p.Rank) else "goal reached!")
+ if reset and reset&lt;=30 then hint.Text="Mine reset in "..reset.."s — return to the rim." end
+ if old and p.Money&gt;old.Money then sound("Sell"); notify("+$"..(p.Money-old.Money)) end
+ if old and p.Rank&gt;old.Rank then sound("Rank"); notify("Rank "..string.char(64+p.Rank).." unlocked!") end
+ -- Refresh buttons only after local mutations, not on every two-second state update while typing.
+ if panel.Visible and page~="Rewards" then render() end
+ if player.Character then
+  local tool=player.Character:FindFirstChildOfClass("Tool")
+  if tool then tool.Name=C.Picks[p.Pick].Name end
+ end
+end)
+local pet: Part?=nil
+local music=Instance.new("Sound"); music.Name="YardAmbience"; music.Looped=true; music.Volume=0.15; music.Parent=gui
+if C.Audio.Music&gt;0 then music.SoundId="rbxassetid://"..C.Audio.Music; music:Play() end
+task.spawn(function()
+ while true do
+  task.wait(0.12)
+  if current then
+   music.Volume=if current.Settings.Music then 0.15 else 0
+   local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+   if current.Enchants.Pet&gt;0 and root and root:IsA("BasePart") then
+    if not pet then pet=Instance.new("Part"); pet.Name="WorkshopBuddy"; pet.Size=Vector3.new(1.4,1.4,1.4); pet.Anchored=true; pet.CanCollide=false; pet.CanQuery=false; pet.Color=Color3.fromRGB(237,181,78); pet.Parent=workspace end
+    pet.CFrame=root.CFrame*CFrame.new(3,1+(if current.Settings.Motion then math.sin(os.clock()*2)*0.3 else 0),2)
+   elseif pet then pet:Destroy(); pet=nil end
+   local tool=player.Character and player.Character:FindFirstChildOfClass("Tool")
+   local blade=tool and tool:FindFirstChild("Blade")
+   if blade and blade:IsA("BasePart") then blade.Color=if current.Enchants.Skin&gt;0 then Color3.fromRGB(242,185,72) else Color3.fromRGB(117,206,210) end
+  end
+  local block=target(); lastTarget=block
+  health.Text=if block then block.Name.." "..tostring(block:GetAttribute("Health")).." HP" else ""
+  if current and (held or (auto and current.Passes.Auto)) and not panel.Visible then
+   if not block and auto and player.Character then
+    local root=player.Character:FindFirstChild("HumanoidRootPart")
+    if root and root:IsA("BasePart") then
+     local nearest=C.Reach
+     for _,candidate in game:GetService("CollectionService"):GetTagged("MineBlock") do
+      if candidate:IsA("BasePart") then local distance=(candidate.Position-root.Position).Magnitude; if distance&lt;nearest then nearest=distance; block=candidate end end
+     end
+    end
+   end
+   if block then action:FireServer("Mine",block) end
+  end
+ end
+end)
+action:FireServer("Sync")
+</ProtectedString>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
